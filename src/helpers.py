@@ -1,45 +1,333 @@
 # import the dependencies
 import sys
 # general imports
-import sys
 import numpy as np
-import os
 import pandas as pd
 from anndata import AnnData, read_h5ad
 import scipy as sp
 from scipy.sparse import coo_matrix
 import collections
-import scanpy as sc
 from collections import Counter
 import anndata as ad
 import gzip
 from scipy import sparse
 import re
 import shutil
-# Images, plots, display, and visualization
-import scipy as sp
+from sklearn.decomposition import PCA
 from sklearn.utils import resample
 from scipy.spatial.distance import squareform
 from scipy.cluster.hierarchy import linkage, dendrogram
 import matplotlib.pyplot as plt
-import pandas as pd
 import seaborn as sns
 import pickle
 import scanpy as sc
-import pandas as pd
-import numpy as np
 from scipy.sparse import issparse
 from pydeseq2.default_inference import DefaultInference
 from pydeseq2.dds import DeseqDataSet
 from pydeseq2.ds import DeseqStats
 import os
-import sys
 import gc
 from multiprocessing import Pool
 from pathlib import Path
 sys.path.insert(1, '../../')
 sys.path.insert(1, '../')
 sys.path.insert(1, '../../../../../')
+
+def remove_unassigned_cells(adata, dataset_name):
+    """
+    Removes cells with missing or unassigned cell types.
+
+    Parameters:
+    - adata: AnnData object
+    - dataset_name: str, name of the dataset for logging
+
+    Returns:
+    - Cleaned AnnData object
+    """
+
+    # Ensure cell types are strings and remove leading/trailing spaces
+    adata.obs["cell_types"] = adata.obs["cell_types"].astype(str).str.strip()
+
+    # Define unwanted or unassigned cell types
+    unwanted_types = ["Blood: Undefined", "NA", "SC & Eosinophil", "nan", "", "None"]
+
+    # Count missing before removal
+    initial_count = adata.n_obs
+    missing_cells = adata.obs["cell_types"].isin(unwanted_types) | adata.obs["cell_types"].isna()
+
+    # Remove unassigned/missing cells
+    adata = adata[~missing_cells].copy()
+    
+    # Log the change
+    removed_count = initial_count - adata.n_obs
+    print(f"{dataset_name}: Removed {removed_count} unassigned/missing cells. Remaining: {adata.n_obs}")
+
+    return adata
+
+def transform_heldout_sn_to_mean_sc(
+    sc_data: pd.DataFrame,
+    sn_data: pd.DataFrame,
+    sn_heldout_data: pd.DataFrame,
+    sc_celltype_labels: pd.Series,
+    sn_celltype_labels: pd.Series,
+    heldout_label: str,
+    variance_threshold: float = 0.90
+):
+    """
+    Transforms the 'held-out' SN cell type (sn_heldout_data) to match the average
+    PCA profile shift across overlapping SC vs SN cell types, then scales
+    to match the median SC library size.
+
+    Aligns columns across SC data, SN data, and the SN held‐out subset.
+    Performs PCA using only the shared cell types (excluding the held‐out).
+    Computes an average shift across overlapping cell types.
+    Applies that composite shift to the held‐out cells.
+    Exponentiates and rescales to match the median SC library size.
+
+    Parameters
+    ----------
+    sc_data : pd.DataFrame
+        Single-cell data, rows = cells, columns = genes (raw counts).
+    sn_data : pd.DataFrame
+        Single-nucleus data, rows = cells, columns = genes (raw counts).
+    sn_heldout_data : pd.DataFrame
+        Single-nucleus data for the held-out cell type, rows = cells, columns = genes (raw counts).
+    sc_celltype_labels : pd.Series
+        Cell-type labels for the rows of sc_data (index-aligned).
+    sn_celltype_labels : pd.Series
+        Cell-type labels for the rows of sn_data (index-aligned).
+    heldout_label : str
+        The label (cell type) that is missing in SC but present in SN (for sn_heldout_data).
+    variance_threshold : float
+        Fraction of variance to retain in PCA (e.g., 0.90).
+
+    Returns
+    -------
+    pd.DataFrame
+        The transformed SN-heldout data (rows = cells, columns = genes),
+        with matched gene columns and library sizes akin to typical SC.
+    """
+
+    # 1) Align columns (genes) across SC, SN, and SN-heldout
+    common_genes = sc_data.columns.intersection(sn_data.columns).intersection(sn_heldout_data.columns)
+    sc_data_aligned = sc_data[common_genes]
+    sn_data_aligned = sn_data[common_genes]
+    sn_heldout_data_aligned = sn_heldout_data[common_genes]
+
+    # 2) Identify overlapping cell types (excluding the held-out type)
+    overlapping_types = np.intersect1d(sc_celltype_labels.unique(), sn_celltype_labels.unique())
+    overlapping_types = overlapping_types[overlapping_types != heldout_label]
+
+    # 3) Fit PCA on combined SC+SN, excluding the held-out SN
+    keep_sn_mask = (sn_celltype_labels != heldout_label)
+    combined_df = pd.concat([sc_data_aligned, sn_data_aligned.loc[keep_sn_mask]], axis=0)
+    combined_log = np.log1p(combined_df)
+
+    pca_full = PCA()
+    pca_full.fit(combined_log)
+    cumsum_var = np.cumsum(pca_full.explained_variance_ratio_)
+    n_components = np.searchsorted(cumsum_var, variance_threshold) + 1
+    pca = PCA(n_components=n_components)
+    pca.fit(combined_log)
+
+    # 4) Compute SHIFT VECTORS for each overlapping cell type
+    #    SHIFT = mean(SC in PCA) - mean(SN in PCA)
+    shift_vectors = []
+    for ct in overlapping_types:
+        sc_cells_ct = sc_data_aligned.loc[sc_celltype_labels == ct]
+        sn_cells_ct = sn_data_aligned.loc[sn_celltype_labels == ct]
+
+        if not sc_cells_ct.empty and not sn_cells_ct.empty:
+            sc_log = np.log1p(sc_cells_ct)
+            sn_log = np.log1p(sn_cells_ct)
+            sc_pcs = pca.transform(sc_log)
+            sn_pcs = pca.transform(sn_log)
+            mean_sc_pca = sc_pcs.mean(axis=0)
+            mean_sn_pca = sn_pcs.mean(axis=0)
+            shift_vectors.append(mean_sc_pca - mean_sn_pca)
+
+    # 5) Average these SHIFT vectors
+    if len(shift_vectors) == 0:
+        # fallback: do a simpler global SC-vs-SN shift
+        print("No overlapping cell types found! Using global SC-SN shift.")
+        all_sc_log = np.log1p(sc_data_aligned)
+        all_sn_log = np.log1p(sn_data_aligned.loc[keep_sn_mask])
+        composite_shift = (
+            pca.transform(all_sc_log).mean(axis=0)
+            - pca.transform(all_sn_log).mean(axis=0)
+        )
+    else:
+        composite_shift = np.mean(shift_vectors, axis=0)
+
+    # 6) Transform the HELD-OUT SN cells with that composite shift
+    ho_log = np.log1p(sn_heldout_data_aligned)
+    ho_pcs = pca.transform(ho_log)
+    ho_pcs_shifted = ho_pcs + composite_shift
+    ho_log_transformed = pca.inverse_transform(ho_pcs_shifted)
+
+    # 7) Exponentiate to get back near "counts"
+    ho_exp = np.expm1(ho_log_transformed)
+
+    # 8) Scale each cell's library to match typical SC library size
+    sc_totals = sc_data_aligned.sum(axis=1)
+    median_sc_lib = np.median(sc_totals)
+    for i in range(ho_exp.shape[0]):
+        row_sum = ho_exp[i, :].sum()
+        if row_sum > 0:
+            ho_exp[i, :] *= (median_sc_lib / row_sum)
+
+    # 9) Build final DataFrame with the same row index + gene columns
+    transformed_df = pd.DataFrame(
+        ho_exp,
+        index=sn_heldout_data_aligned.index,
+        columns=common_genes
+    )
+    return transformed_df
+
+
+
+def filter_out_cell_markers(adata_sc, adata_sn, diff_genes, marker_threshold=50):
+    """
+    Removes differentially expressed genes that are also strong cell markers.
+
+    Parameters
+    ----------
+    adata_sc : AnnData
+        Single-cell AnnData object.
+    adata_sn : AnnData
+        Single-nucleus AnnData object.
+    diff_genes : dict
+        Dictionary of differentially expressed genes (DEGs) from DESeq2.
+    marker_threshold : int, optional
+        Number of top marker genes to consider per cell type, by default 50.
+
+    Returns
+    -------
+    filtered_diff_genes : dict
+        Differentially expressed genes with cell markers removed.
+    """
+    # Ensure data is logarithmized
+    adata_sc = adata_sc.copy()
+    adata_sn = adata_sn.copy()
+    sc.pp.log1p(adata_sc)
+    sc.pp.log1p(adata_sn)
+
+    # Combine SC and SN data to get cell markers
+    adata_combined = ad.concat([adata_sc, adata_sn])
+
+    # Run Scanpy's `rank_genes_groups` to find top markers
+    sc.tl.rank_genes_groups(adata_combined, groupby="cell_types", method="wilcoxon")
+
+    # Extract top marker genes correctly
+    marker_df = pd.DataFrame(adata_combined.uns["rank_genes_groups"]["names"])
+    marker_genes = set(marker_df.iloc[:marker_threshold].values.flatten())
+
+    print(f"Identified {len(marker_genes)} potential cell marker genes.")
+
+    # Filter DEGs by removing markers
+    filtered_diff_genes = {}
+    for cell_type, genes_df in diff_genes.items():
+        filtered_genes = genes_df[~genes_df.index.isin(marker_genes)]
+        filtered_diff_genes[cell_type] = filtered_genes
+
+    print("Filtered out marker genes from DEGs.")
+
+    return filtered_diff_genes
+
+def load_PNB_data(data_type: str, load_testing: bool = False):
+    """
+    Open the data of PNB. We have 1 SN and 1 SC from same patient, and 1 SC from another for testing.
+
+    Parameters
+    ----------
+    data_type : str (either "single_nucleus" or "single_cell")
+
+    Returns
+    -------
+    AnnData
+        TheAnnData object.
+    Metadata
+        Pandas Dataframe.
+    """
+    res_name = "PNB"
+    adata = []
+    meta_data = []
+    path = f"{os.getcwd()}/../data/{res_name}/"  # Path to original data.
+
+    if data_type == "single_cell":
+        if load_testing:
+            # File paths
+            h5_gz_file = Path(path, "GSM4186962_HTAPP-312-SMP-902_fresh-C4-T2_channel1_raw_gene_bc_matrices_h5.h5.gz")
+            h5_file = Path(path, "GSM4186962_HTAPP-312-SMP-902_fresh-C4-T2_channel1_raw_gene_bc_matrices_h5.h5")
+            csv_file = Path(path, "GSM4186962_metadata_HTAPP-312-SMP-902_fresh-C4-T2_channel1.csv.gz")
+
+            # Decompressing the h5.gz file
+            with gzip.open(h5_gz_file, "rb") as f_in:
+                with open(h5_file, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+
+            # Importing the data
+            sc_adata = sc.read_10x_h5(h5_file)  # Read the h5 file
+            sc_adata.var_names_make_unique()
+            # Read the CSV file using pandas
+            sc_metadata = pd.read_csv(csv_file)
+            # clean up cell name to match obs in AnnData
+            sc_metadata["cell"] = sc_metadata["Unnamed: 0"].apply(split_ID_2).astype(str)
+            sc_metadata["cell"] = sc_metadata["cell"].apply(merge_strings)
+
+            adata = sc_adata
+            meta_data = sc_metadata
+
+        else:
+            # File paths
+            h5_gz_file = Path(path, "GSM4186963_HTAPP-656-SMP-3481_fresh-T1_channel1_raw_gene_bc_matrices_h5.h5.gz")
+            h5_file = Path(path, "GSM4186963_HTAPP-656-SMP-3481_fresh-T1_channel1_raw_gene_bc_matrices_h5.h5")
+            csv_file = Path(path, "GSM4186963_metadata_HTAPP-656-SMP-3481_fresh-T1_channel1.csv.gz")
+
+            # Decompressing the h5.gz file
+            with gzip.open(h5_gz_file, "rb") as f_in:
+                with open(h5_file, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+
+            # Importing the data
+            sc_adata = sc.read_10x_h5(h5_file)  # Read the h5 file
+            sc_adata.var_names_make_unique()
+            # Read the CSV file using pandas
+            sc_metadata = pd.read_csv(csv_file)
+            # clean up cell name to match obs in AnnData
+            sc_metadata["cell"] = sc_metadata["Unnamed: 0"].apply(split_ID_2).astype(str)
+            sc_metadata["cell"] = sc_metadata["cell"].apply(merge_strings)
+
+            adata = sc_adata
+            meta_data = sc_metadata
+
+    elif data_type == "single_nucleus":
+        # File paths
+        h5_gz_file = Path(path, "GSM4186969_HTAPP-656-SMP-3481_TST_channel1_raw_gene_bc_matrices_h5.h5.gz")
+        h5_file = Path(path, "GSM4186969_HTAPP-656-SMP-3481_TST_channel1_raw_gene_bc_matrices_h5.h5")
+        csv_file = Path(path, "GSM4186969_metadata_HTAPP-656-SMP-3481_TST_channel1.csv.gz")
+
+        # Decompressing the h5.gz file
+        with gzip.open(h5_gz_file, "rb") as f_in:
+            with open(h5_file, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+
+        # Importing the data
+        sn_adata = sc.read_10x_h5(h5_file)  # Read the h5 file
+        sn_adata.var_names_make_unique()
+        # Read the CSV file using pandas
+        sn_metadata = pd.read_csv(csv_file)
+        # clean up cell name to match obs
+        sn_metadata["cell"] = sn_metadata["Unnamed: 0"].apply(split_ID).astype(str)
+        sn_metadata["cell"] = sn_metadata["cell"].apply(merge_strings)
+
+        adata = sn_adata
+        meta_data = sn_metadata
+
+    else:
+        print('Give valid data type: "single_cell" or "single_nucleus"')
+
+    return adata, meta_data
 
 def split_ID(row):
     """Takes in one row of DataFrame, returns the right cell name in metadata of MBC"""
@@ -79,10 +367,8 @@ def assign_cell_types(adata: AnnData, cell_types_assign: np.array) -> AnnData:
 
     return adata
     
-# Function to make table of cell proportions
 def make_prop_table(adata: sc.AnnData, obs):
     """
-
     Makes proportion table from AnnData object's cell types.
 
     Parameters
@@ -332,6 +618,81 @@ def qc_check_cell_types_match(original_anndata_path, sc_ref_path, sn_ref_path, p
 
     print("Cell types match across original AnnData, references, and pseudobulks.")
 
+def create_fixed_pseudobulk(adata, group_size=10):
+    """
+    Aggregates cells into pseudobulks of size `group_size` for each cell type.
+    If the cell count is not divisible by `group_size`, leftover cells are dropped.
+    
+    Returns:
+        AnnData where each row is a pseudobulk sample and columns are genes.
+        The new AnnData has:
+         - obs["cell_type"] to indicate which cell type the pseudobulk came from.
+         - obs["group_id"] to indicate the pseudobulk group number within that cell type.
+    """
+    import numpy as np
+    import pandas as pd
+    from anndata import AnnData
+    from scipy.sparse import issparse, csr_matrix
+    
+    all_pseudobulks = []
+    obs_list = []
+    var_names = adata.var_names
+    
+    # For each cell type, group the cells in sets of `group_size`
+    for cell_type in adata.obs["cell_types"].unique():
+        subset = adata[adata.obs["cell_types"] == cell_type]
+        n_cells = subset.shape[0]
+        
+        # Number of complete groups
+        n_groups = n_cells // group_size
+        if n_groups == 0:
+            continue  # skip if fewer than group_size cells for this type
+
+        # Only keep the cells that form complete groups
+        used_cells_count = n_groups * group_size
+        subset = subset[:used_cells_count, :]
+        
+        # Convert to dense or keep it sparse
+        mat = subset.X
+        if issparse(mat):
+            mat = mat.toarray()
+        
+        # Reshape so we can sum every 10 rows
+        # (One approach: group them in consecutive blocks of group_size)
+        mat_reshaped = mat.reshape(n_groups, group_size, mat.shape[1])
+        
+        # Sum across the group_size dimension => shape (n_groups, n_genes)
+        pseudobulk_counts = mat_reshaped.sum(axis=1)
+        
+        # Create an obs DataFrame for these pseudobulks
+        group_ids = [f"{cell_type}_group{i+1}" for i in range(n_groups)]
+        obs_tmp = pd.DataFrame({
+            "cell_types": cell_type,
+            "group_id": group_ids
+        }, index=group_ids)  # index must match the new row names
+        
+        # Store these counts to combine later
+        all_pseudobulks.append(pseudobulk_counts)
+        obs_list.append(obs_tmp)
+    
+    # If nothing was aggregated, return empty
+    if not all_pseudobulks:
+        print("No groups formed for any cell type.")
+        return None
+    
+    # Concatenate everything
+    big_matrix = np.vstack(all_pseudobulks)
+    big_obs = pd.concat(obs_list, axis=0)
+    big_obs.index.name = None  # Clean up
+    
+    # Create new AnnData
+    pseudo_adata = AnnData(X=csr_matrix(big_matrix),  # keep it sparse to save memory
+                           obs=big_obs,
+                           var=pd.DataFrame(index=var_names))
+    
+    return pseudo_adata
+
+
 def save_cibersort(pseudobulks_df=[], 
                         proportions_df=[], 
                         adata_sc_ref=[], 
@@ -406,13 +767,17 @@ def save_bayesprism_pseudobulks(pseudobulks_df, proportions_df, output_path):
     - Genes in rows
     - Samples in columns (indexed from 1 to n)
     """
-    print("Saving BayesPrism pseudobulks...")
-    gene_ids = pseudobulks_df.columns 
-    pseudobulks_df.index = range(1, pseudobulks_df.shape[1] + 1)  # Sample IDs as sequential numbers
-    pseudobulks_df.columns = gene_ids
+    # Ensure genes are in rows and samples in columns
+    pseudobulks_df = pseudobulks_df.T  # Transpose to get genes in rows, samples in columns
+    print("Pseudobulks shape: ", pseudobulks_df.shape)
+
+    # Assign sequential sample indices starting from 1
+    sample_ids = range(1, pseudobulks_df.shape[1] + 1)
+    pseudobulks_df.columns = sample_ids  # Columns should now be sample IDs
     pseudobulks_df.to_csv(os.path.join(output_path, "pseudobulks.csv"))
-    # proportion columns are cell types, index is sample number
-    proportions_df.index = range(1, pseudobulks_df.shape[0] + 1)  # Sample IDs as sequential numbers
+
+    # Ensure proportions_df has the correct sample index
+    proportions_df.index = sample_ids  # Match proportions index to sample IDs
     proportions_df.to_csv(os.path.join(output_path, "proportions.csv"))
 
 def save_bayesprism_references(adata, output_path, prefix):
@@ -424,9 +789,13 @@ def save_bayesprism_references(adata, output_path, prefix):
     print(f"Saving BayesPrism reference files for {prefix}...")
 
     # Create _signal.csv (Gene expression matrix)
+    if isinstance(adata.X, np.ndarray):
+        tosave = adata.X.T
+    else:
+        tosave = adata.X.toarray().T
     signal_df = pd.DataFrame(
-        adata.X.toarray().T,  # Transpose to make genes rows and cells columns
-        index=all_adatas.var_names,  # Gene names as index
+        tosave,  # Transpose to make genes rows and cells columns
+        index=adata.var_names,  # Gene names as index
         columns=range(1, adata.n_obs + 1)  # Cell IDs as sequential numbers
     )
     signal_df.index.name = "gene_ids"
@@ -446,47 +815,49 @@ def remove_diff_genes(sc_adata, sn_adata, diff_genes):
     Removes differentially expressed genes from the AnnData objects.
     If no differentially expressed genes are found, return original data.
     """
-
     if not diff_genes:  # Handle the case where no genes are found
         print("No differentially expressed genes found. Skipping gene removal step.")
         return sc_adata, sn_adata
 
-    diff_gene_set = set(np.concatenate([df.index.values for df in diff_genes.values()]))
+    diff_gene_set = list(set(np.concatenate([df.index.values for df in diff_genes.values()])))
 
-    # Keep only genes that are NOT in the diff_gene_set
-    valid_genes_sn = [gene for gene in sn_adata.var_names if gene not in diff_gene_set]
-    valid_genes_sc = [gene for gene in sc_adata.var_names if gene not in diff_gene_set]
+    print("This is diff_gene_set completed:", diff_gene_set)
+
+    print("These are the anndatas before filtering:")
+    print(sc_adata.shape)
+    print(sn_adata.shape)
 
     # Filter the AnnData objects
-    sn_adata_filtered = sn_adata[:, valid_genes_sn].copy()
-    sc_adata_filtered = sc_adata[:, valid_genes_sc].copy()
+    sn_adata_filtered = sn_adata[:, ~np.isin(sn_adata.var_names, diff_gene_set)].copy()
+    sc_adata_filtered = sc_adata[:, ~np.isin(sc_adata.var_names, diff_gene_set)].copy()
+
+    print("These are the anndatas after filtering:")
+    print(sc_adata_filtered.shape)
+    print(sn_adata_filtered.shape)
 
     return sc_adata_filtered, sn_adata_filtered
 
-def differential_expression_analysis_parallel(sn_adata, sc_adata, num_threads=4, n_cpus_per_thread=16):
-    """
-    Runs DESeq2 analysis for multiple cell types in parallel.
-    
-    - Uses `num_threads` processes.
-    - Each process runs DESeq2 with `n_cpus_per_thread` CPUs.
-    """
+def differential_expression_analysis_parallel(sn_adata, sc_adata, num_threads=4, n_cpus_per_thread=8, deseq_alpha=0.001):
+    from multiprocessing import Pool
+
     common_cell_types = list(set(sn_adata.obs['cell_types']).intersection(sc_adata.obs['cell_types']))
+    print(f"Running DESeq2 in parallel for {len(common_cell_types)} cell types...")
 
-    print(f"Running differential expression analysis in parallel for {len(common_cell_types)} cell types...")
+    tasks = []
+    for ct in common_cell_types:
+        # Subset once in the main process
+        sn_subset = sn_adata[sn_adata.obs['cell_types'] == ct].copy()
+        sc_subset = sc_adata[sc_adata.obs['cell_types'] == ct].copy()
+        tasks.append((ct, sn_subset, sc_subset, n_cpus_per_thread, deseq_alpha))
 
-    # Run DESeq2 in parallel
     with Pool(num_threads) as p:
-        results = p.starmap(run_deseq2_for_cell_type, [(ct, sn_adata, sc_adata, n_cpus_per_thread) for ct in common_cell_types])
+        results = p.starmap(run_deseq2_for_cell_type, tasks)
 
-    # Collect results
     diff_genes = {cell_type: res for cell_type, res in results if res is not None}
-
-    if not diff_genes:
-        print("No differentially expressed genes found for any cell type.")
 
     return diff_genes
 
-def differential_expression_analysis(sn_adata, sc_adata):
+def differential_expression_analysis(sn_adata, sc_adata, deseq_alpha=0.001):
     """
     Perform differential gene expression analysis between corresponding cell types
     in single-nucleus (sn_adata) and single-cell (sc_adata) AnnData objects.
@@ -546,19 +917,19 @@ def differential_expression_analysis(sn_adata, sc_adata):
         dds.deseq2()
 
         # Extract results
-        deseq_stats = DeseqStats(dds, alpha=0.05)
+        deseq_stats = DeseqStats(dds, alpha=deseq_alpha)
         deseq_stats.summary()
         results_df = deseq_stats.results_df
 
         # Filter for significantly differentially expressed genes
-        sig_genes = results_df[(results_df['padj'] < 0.05) & (results_df['log2FoldChange'].abs() > 1)]
+        sig_genes = results_df[(results_df['padj'] < deseq_alpha) & (results_df['log2FoldChange'].abs() > 1)]
 
         # Store results in the dictionary
         diff_genes[cell_type] = sig_genes
 
     return diff_genes
 
-def run_deseq2_for_cell_type(cell_type, sn_adata, sc_adata, n_cpus=1):
+def run_deseq2_for_cell_type(cell_type, sn_adata, sc_adata, n_cpus=8, deseq_alpha=0.001):
     """Runs DESeq2 for a single cell type without expression-based filtering."""
     print(f"Running DESeq2 for {cell_type}...")
 
@@ -584,9 +955,9 @@ def run_deseq2_for_cell_type(cell_type, sn_adata, sc_adata, n_cpus=1):
     sn_cells = sn_cells[:, common_genes]
     sc_cells = sc_cells[:, common_genes]
 
-    # Convert sparse matrices to dense
-    sn_X = sn_cells.X.toarray() if issparse(sn_cells.X) else np.array(sn_cells.X)
-    sc_X = sc_cells.X.toarray() if issparse(sc_cells.X) else np.array(sc_cells.X)
+    # Convert sparse matrices to dense **only if necessary**
+    sn_X = sn_cells.X.toarray() if issparse(sn_cells.X) else sn_cells.X
+    sc_X = sc_cells.X.toarray() if issparse(sc_cells.X) else sc_cells.X
 
     # Ensure matrices are 2D
     if sn_X.ndim == 1:
@@ -623,15 +994,15 @@ def run_deseq2_for_cell_type(cell_type, sn_adata, sc_adata, n_cpus=1):
 
     # Run DESeq2
     try:
-        inference = DefaultInference(n_cpus=1)
+        inference = DefaultInference(n_cpus=n_cpus)
         dds = DeseqDataSet(counts=combined_counts.astype(int), metadata=metadata, design_factors="condition", inference=inference)
         dds.deseq2()
-        deseq_stats = DeseqStats(dds, inference=inference, alpha=0.05)
+        deseq_stats = DeseqStats(dds, inference=inference, alpha=deseq_alpha)
         deseq_stats.summary()
         results_df = deseq_stats.results_df
 
         # Apply differential expression significance filtering
-        sig_genes = results_df[(results_df['padj'] < 0.05) & (results_df['log2FoldChange'].abs() > 1)]
+        sig_genes = results_df[(results_df['padj'] < deseq_alpha) & (results_df['log2FoldChange'].abs() > 1)]
 
         return cell_type, sig_genes
 
@@ -830,9 +1201,11 @@ def split_single_cell_data(adata_sc, test_ratio=0.3, data_type=""):
     return adata_pseudo, adata_ref
 
 def prepare_data(res_name, base_path):
-    path_x = os.path.join(base_path, res_name)
-    adata_path = os.path.join(path_x, f"sc_sn_{res_name}_processed.h5ad")
 
+    path_x = os.path.join(base_path, res_name)
+
+    adata_path = os.path.join(path_x, f"sc_sn_{res_name}_processed.h5ad")
+    print(adata_path)
     # Load the dataset in backed mode
     adata = sc.read_h5ad(adata_path, backed='r')
 
