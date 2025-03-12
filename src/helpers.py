@@ -1,6 +1,7 @@
 # import the dependencies
 import sys
-# general imports
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 import numpy as np
 import pandas as pd
 from anndata import AnnData, read_h5ad
@@ -13,7 +14,6 @@ import gzip
 from scipy import sparse
 import re
 import shutil
-from sklearn.decomposition import PCA
 from sklearn.utils import resample
 from scipy.spatial.distance import squareform
 from scipy.cluster.hierarchy import linkage, dendrogram
@@ -29,9 +29,10 @@ import os
 import gc
 from multiprocessing import Pool
 from pathlib import Path
+
 sys.path.insert(1, '../../')
 sys.path.insert(1, '../')
-sys.path.insert(1, '../../../../../')
+sys.path.insert(1, '../../../')
 
 def remove_unassigned_cells(adata, dataset_name):
     """
@@ -78,12 +79,6 @@ def transform_heldout_sn_to_mean_sc(
     PCA profile shift across overlapping SC vs SN cell types, then scales
     to match the median SC library size.
 
-    Aligns columns across SC data, SN data, and the SN held‐out subset.
-    Performs PCA using only the shared cell types (excluding the held‐out).
-    Computes an average shift across overlapping cell types.
-    Applies that composite shift to the held‐out cells.
-    Exponentiates and rescales to match the median SC library size.
-
     Parameters
     ----------
     sc_data : pd.DataFrame
@@ -109,81 +104,86 @@ def transform_heldout_sn_to_mean_sc(
     """
 
     # 1) Align columns (genes) across SC, SN, and SN-heldout
+    ## to ensure that only genes present in all three DataFrames are used. This step prevents misalignment in subsequent transforms.
     common_genes = sc_data.columns.intersection(sn_data.columns).intersection(sn_heldout_data.columns)
     sc_data_aligned = sc_data[common_genes]
     sn_data_aligned = sn_data[common_genes]
     sn_heldout_data_aligned = sn_heldout_data[common_genes]
 
     # 2) Identify overlapping cell types (excluding the held-out type)
+
+    # We gather the cell types shared by both SC and SN.
     overlapping_types = np.intersect1d(sc_celltype_labels.unique(), sn_celltype_labels.unique())
+    # We exclude the heldout type so it won’t affect the PCA transformation.
     overlapping_types = overlapping_types[overlapping_types != heldout_label]
 
     # 3) Fit PCA on combined SC+SN, excluding the held-out SN
+
+    ## We remove the heldout single‐nucleus cells from the PCA training set (i.e., “SN except heldout”), 
+    # so PCA is only learning from the types SC and SN have in common
     keep_sn_mask = (sn_celltype_labels != heldout_label)
     combined_df = pd.concat([sc_data_aligned, sn_data_aligned.loc[keep_sn_mask]], axis=0)
-    combined_log = np.log1p(combined_df)
 
+    # Apply log1p and standard scaling
+    combined_log = np.log1p(combined_df)
+    scaler = StandardScaler()
+    combined_scaled = scaler.fit_transform(combined_log)
+
+    # Fit PCA
     pca_full = PCA()
-    pca_full.fit(combined_log)
+    pca_full.fit(combined_scaled)
     cumsum_var = np.cumsum(pca_full.explained_variance_ratio_)
     n_components = np.searchsorted(cumsum_var, variance_threshold) + 1
+    # second PCA with the chosen n_components, 
+    # ensuring we only keep enough components to reach the variance_threshold
     pca = PCA(n_components=n_components)
-    pca.fit(combined_log)
+    pca.fit(combined_scaled)
 
     # 4) Compute SHIFT VECTORS for each overlapping cell type
-    #    SHIFT = mean(SC in PCA) - mean(SN in PCA)
     shift_vectors = []
     for ct in overlapping_types:
         sc_cells_ct = sc_data_aligned.loc[sc_celltype_labels == ct]
         sn_cells_ct = sn_data_aligned.loc[sn_celltype_labels == ct]
 
         if not sc_cells_ct.empty and not sn_cells_ct.empty:
-            sc_log = np.log1p(sc_cells_ct)
-            sn_log = np.log1p(sn_cells_ct)
-            sc_pcs = pca.transform(sc_log)
-            sn_pcs = pca.transform(sn_log)
-            mean_sc_pca = sc_pcs.mean(axis=0)
-            mean_sn_pca = sn_pcs.mean(axis=0)
-            shift_vectors.append(mean_sc_pca - mean_sn_pca)
+            sc_scaled = scaler.transform(np.log1p(sc_cells_ct))
+            sn_scaled = scaler.transform(np.log1p(sn_cells_ct))
+            sc_pcs = pca.transform(sc_scaled)
+            sn_pcs = pca.transform(sn_scaled)
+            shift_vectors.append(np.mean(sc_pcs, axis=0) - np.mean(sn_pcs, axis=0))
 
-    # 5) Average these SHIFT vectors
+    # 5) Compute the composite shift vector
     if len(shift_vectors) == 0:
-        # fallback: do a simpler global SC-vs-SN shift
         print("No overlapping cell types found! Using global SC-SN shift.")
-        all_sc_log = np.log1p(sc_data_aligned)
-        all_sn_log = np.log1p(sn_data_aligned.loc[keep_sn_mask])
-        composite_shift = (
-            pca.transform(all_sc_log).mean(axis=0)
-            - pca.transform(all_sn_log).mean(axis=0)
-        )
+        all_sc_scaled = scaler.transform(np.log1p(sc_data_aligned))
+        all_sn_scaled = scaler.transform(np.log1p(sn_data_aligned.loc[keep_sn_mask]))
+        composite_shift = np.mean(pca.transform(all_sc_scaled), axis=0) - np.mean(pca.transform(all_sn_scaled), axis=0)
     else:
         composite_shift = np.mean(shift_vectors, axis=0)
 
     # 6) Transform the HELD-OUT SN cells with that composite shift
-    ho_log = np.log1p(sn_heldout_data_aligned)
-    ho_pcs = pca.transform(ho_log)
+    ho_scaled = scaler.transform(np.log1p(sn_heldout_data_aligned))
+    ho_pcs = pca.transform(ho_scaled)
     ho_pcs_shifted = ho_pcs + composite_shift
     ho_log_transformed = pca.inverse_transform(ho_pcs_shifted)
 
-    # 7) Exponentiate to get back near "counts"
+    # 7) Exponentiate (count scale) and clip negatives
+    # we revert the log1p transformation with expm1, then clamp negative values to zero.
     ho_exp = np.expm1(ho_log_transformed)
+    ho_exp[ho_exp < 0] = 0  # Ensure no negatives
 
-    # 8) Scale each cell's library to match typical SC library size
-    sc_totals = sc_data_aligned.sum(axis=1)
-    median_sc_lib = np.median(sc_totals)
+    # 8) Scale each cell's library to match the median SC library size
+    # each cell in the transformed set is scaled to match the “typical” (median) SC library size.
+    median_sc_lib = np.median(sc_data_aligned.sum(axis=1))
     for i in range(ho_exp.shape[0]):
         row_sum = ho_exp[i, :].sum()
         if row_sum > 0:
             ho_exp[i, :] *= (median_sc_lib / row_sum)
 
-    # 9) Build final DataFrame with the same row index + gene columns
-    transformed_df = pd.DataFrame(
-        ho_exp,
-        index=sn_heldout_data_aligned.index,
-        columns=common_genes
-    )
-    return transformed_df
+    # 9) Convert to DataFrame
+    transformed_df = pd.DataFrame(ho_exp, index=sn_heldout_data_aligned.index, columns=common_genes)
 
+    return transformed_df
 
 
 def filter_out_cell_markers(adata_sc, adata_sn, diff_genes, marker_threshold=50):
