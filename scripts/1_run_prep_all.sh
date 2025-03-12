@@ -20,8 +20,8 @@ BASE_DIR=$(realpath "$SLURM_SUBMIT_DIR/..")
 
 # Define relative data and output paths
 data_path="${BASE_DIR}/data"
+
 # In our case, the output directory for deconvolution files is under BASE_DIR/deconvolution
-# (adjust as needed)
 output_root="${BASE_DIR}/data/deconvolution"
 
 # Activate the conda environment
@@ -30,7 +30,7 @@ source ~/.bashrc
 conda deactivate
 conda activate env_deconv
 
-sleep 5
+sleep 5 
 
 # Define common parameters
 pseudobulks_props="{\"realistic\": 500, \"random\": 500}"
@@ -38,9 +38,6 @@ num_cells=1000
 noise=True
 deconvolution_method="bayesprism"
 deseq_alpha=0.01
-
-echo "Python path: $(which python)"
-echo "Python version: $(python --version)"
 
 # List of dataset names to process
 datasets=("ADP" "PBMC" "MBC" "MSB")
