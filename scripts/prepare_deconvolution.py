@@ -1,54 +1,71 @@
 """
 Holdout Cell-Type Deconvolution Experiment
 
-This script performs a series of deconvolution experiments by systematically holding out 
-one cell type from single-cell (SC) data and replacing it with transformed single-nucleus 
-(SN) data. The goal is to assess different transformation techniques for integrating SN 
-data into SC datasets.
+This script generates multiple references for deconvolution by systematically holding out 
+one cell type in single-cell (SC) data and replacing it with single-nucleus (SN) data 
+using various transformation approaches. It also optionally trains/loads scVI models 
+(conditional and non-conditional, with or without DEGs removed) to produce references that 
+mimic the missing cell type as if it were single-cell.
 
-### Overview of Steps:
-1. **Load & Prepare Data**: 
-   - Reads preprocessed single-cell and single-nucleus data.
-   - Splits SC data into reference and pseudobulk sets.
-   - Selects common cell types shared between SC and SN datasets.
+Steps Overview:
+1. **Load Input Data**: Reads single-cell (SC) and single-nucleus (SN) AnnData objects, 
+   splitting the SC data into a reference set and a pseudobulk set.
+2. **Determine Differentially Expressed Genes (DEGs)**: 
+   - If a saved DEGs file (`degs.json`) is found, it is loaded; otherwise, DEGs are 
+     computed by creating small pseudobulks of SC and SN, then running a 
+     parallelized differential expression analysis.
+3. **For Each Cell Type**:
+   - Remove the selected cell type from SC (and from SN except for that held-out group).
+   - Generate these references:
+     a) **rawSN**: SC plus raw SN cells of the missing type  
+     b) **pcaSN**: PCA-based transform to align missing SN to SC  
+     c) **degSN**: DEG-filtered SN  
+     d) **degPCA_SN**: DEG-filtered then PCA transform  
+     e) **scviSN**: scVI-based transform (conditional, all genes)  
+     f) **scvi_LSshift_SN**: scVI-based local latent shift (non-conditional, all genes)  
+     g) **degScviSN**: DEG-filtered scVI-based transform (conditional)  
+     h) **degScviLSshift_SN**: DEG-filtered scVI-based local latent shift (non-conditional)  
+   - Each reference is saved in formats compatible with BayesPrism.
+   - If scVI models for any transform do not exist, they are trained and saved; 
+     otherwise they are loaded from disk.
+4. **Pseudobulk Generation**: 
+   - Creates pseudobulks from the SC pseudobulk subset for downstream deconvolution, 
+     storing both the pseudobulk expression and the known proportions.
+5. **Final Controls**: Saves the full SC reference (`sc_raw`) and full SN reference (`sn_raw`) 
+   for baseline deconvolution comparisons.
 
-2. **Generate Reference Datasets**: 
-   - Creates multiple versions of SC + SN datasets, where the held-out SC cell type is replaced 
-     with SN-derived equivalents using different transformation methods:
-     - **Raw SN**: Directly adding SN data for the missing cell type.
-     - **PCA Transformed SN**: Adjusts SN expression profiles using PCA shifts.
-     - **DEG-Filtered SN**: Removes differentially expressed genes (DEGs) between SC and SN.
-     - **DEG-Filtered + PCA SN**: Applies PCA after DEG removal.
-     - **scVI-VAE Transformed SN**: Uses a deep generative model to harmonize SN data.
+Usage:
+    python holdout_deconvolution.py \
+        --res_name=DATASET_NAME \
+        --data_path=/path/to/data \
+        --output_path=/path/to/save/results \
+        --pseudobulks_props='{"realistic": 500, "random": 500}' \
+        --num_cells=1000 \
+        --noise=True \
+        --deseq_alpha=0.01 \
+        --deconvolution_method=bayesprism
 
-3. **Train & Apply scVI Model**:
-   - Trains an scVI model on SC + SN (excluding the held-out cell type).
-   - Applies the trained model to transform SN-heldout data into SC-like expression.
-   - Saves the trained scVI model for reuse.
-
-4. **Generate Pseudobulk Samples**:
-   - Creates pseudobulk datasets using predefined proportions.
-   - Saves references and pseudobulks in formats compatible with BayesPrism.
-
-5. **Output Files**:
-   - **Processed SC & SN References** (raw, transformed, and filtered versions).
-   - **Trained scVI Model** for each held-out cell type.
-   - **Generated Pseudobulks** for deconvolution experiments.
-
-### Usage:
-This script is designed to be run via a SLURM job submission (use run_prep_all.sh) or from the command line.
-Example command:
-python prepare_deconv_all.py --res_name "ADP" --data_path "data/" --output_path "results/"
---pseudobulks_props '{"realistic": 500, "random": 500}'
---num_cells 1000 --noise True --deconvolution_method "bayesprism" 
+Outputs:
+    - Multiple CSV files named `ref_<celltype>_<transform>_signal.csv/cell_state.csv` 
+      representing each holdout reference.
+    - Trained scVI models in the output_path (if they did not exist).
+    - `degs.json` storing DEGs if calculated.
+    - `pseudobulks.csv` with synthetic mixtures, plus `proportions.csv` with ground truth 
+      for each mixture.
+    - `sc_raw` and `sn_raw` references for baseline usage.
 
 """
 
 import json
 import scanpy as sc
 import pandas as pd
+import json
+import scvi
 import numpy as np
 import os
+import torch 
+import random
+from sklearn.neighbors import NearestNeighbors
 import sys
 import gc
 from scipy.sparse import issparse
@@ -62,15 +79,27 @@ from pydeseq2.ds import DeseqStats
 import sys
 sys.path.insert(1, '../../')
 sys.path.insert(1, '../')
-sys.path.insert(1, '../../../../../')
+sys.path.insert(1, '../../../../')
 from src.helpers import prepare_data, split_single_cell_data 
-from src.helpers import pick_cells, make_references
-from src.helpers import transform_heldout_sn_to_mean_sc
+from src.helpers import pick_cells, make_references, get_normalized_expression_from_latent
+from src.helpers import transform_heldout_sn_to_mean_sc, calculate_median_library_size
 from src.helpers import make_pseudobulks, create_fixed_pseudobulk
-from src.helpers import run_deseq2_for_cell_type
+from src.helpers import run_deseq2_for_cell_type, transform_heldout_sn_to_mean_sc_local
 from src.helpers import differential_expression_analysis, remove_diff_genes
-from src.helpers import differential_expression_analysis_parallel
+from src.helpers import differential_expression_analysis_parallel, transform_heldout_sn_to_mean_sc_VAE
 from src.helpers import save_cibersort, save_bayesprism_references, save_bayesprism_pseudobulks
+
+SEED = 42
+# Set Python built-in random seed
+random.seed(SEED)
+# Set NumPy random seed
+np.random.seed(SEED)
+# Set PyTorch random seeds for CPU and GPU
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+# Ensure reproducibility in hash-based operations
+os.environ['PYTHONHASHSEED'] = str(SEED)
 
 if __name__ == "__main__":
     import argparse
@@ -85,12 +114,6 @@ if __name__ == "__main__":
     parser.add_argument("--deconvolution_method", type=str, default="bayesprism", help="Deconvolution method")
 
     args = parser.parse_args()
-
-    def load_best_config(res_name, output_path):
-        best_config_file = f"{output_path}/best_config_scvi_tune.json"
-        with open(best_config_file, "r") as f:
-            best_config = json.load(f)
-        return best_config
 
     # 1) Load data
     print("Preparing data...")
@@ -110,32 +133,73 @@ if __name__ == "__main__":
     max_cells_per_type = 1500  # Limit to 1500 cells per cell type
     adata_sc_ref, adata_sn_ref = make_references(adata_sc_ref, adata_sn, max_cells_per_type=max_cells_per_type, cell_types=cell_types)
 
-    print("Creating pseudobulk of size 10 for SC and SN data for DGE analysis...")
-    pseudo_sc_adata = create_fixed_pseudobulk(adata_sc_ref, group_size=10)
-    pseudo_sn_adata = create_fixed_pseudobulk(adata_sn_ref, group_size=10)
+    print("Check if differential gene expression calcs. are needed...")
+    genes_save_path = f"{args.output_path}/degs.json"
+    if os.path.exists(genes_save_path):
+        try:
+            with open(genes_save_path, 'r') as file:
+                diff_genes_json = json.load(file)
+            # Convert the JSON representation back into DataFrames
+            diff_genes = {}
+            for key, value in diff_genes_json.items():
+                # Check if this value looks like a DataFrame stored in 'split' orientation
+                if isinstance(value, dict) and {"index", "columns", "data"}.issubset(value.keys()):
+                    diff_genes[key] = pd.DataFrame(**value)
+                else:
+                    diff_genes[key] = value
+        except json.JSONDecodeError:
+            print("Warning: JSON file is empty or corrupted. Recalculating diff_genes...")
+            print("Creating pseudobulk of size 10 for SC and SN data for DGE analysis...")
+            pseudo_sc_adata = create_fixed_pseudobulk(adata_sc_ref, group_size=10)
+            pseudo_sn_adata = create_fixed_pseudobulk(adata_sn_ref, group_size=10)
+            diff_genes = differential_expression_analysis_parallel(
+                sn_adata=pseudo_sn_adata,
+                sc_adata=pseudo_sc_adata, 
+                deseq_alpha=args.deseq_alpha,
+                num_threads=4,          # matches SLURM --ntasks
+                n_cpus_per_thread=16    # matches SLURM --cpus-per-task
+            )
+            # Write a JSON-serializable copy to disk
+            diff_genes_json = {
+                key: value.to_dict(orient='split') if isinstance(value, pd.DataFrame) else value
+                for key, value in diff_genes.items()
+            }
+            with open(genes_save_path, 'w') as file:
+                json.dump(diff_genes_json, file)
+    else:
+        # Calculate differentially expressed genes
+        print("Not found previous diff. gene expr... calculating now!")
+        print("Creating pseudobulk of size 10 for SC and SN data for DGE analysis...")
+        pseudo_sc_adata = create_fixed_pseudobulk(adata_sc_ref, group_size=10)
+        pseudo_sn_adata = create_fixed_pseudobulk(adata_sn_ref, group_size=10)
+        diff_genes = differential_expression_analysis_parallel(
+            sn_adata=pseudo_sn_adata,
+            sc_adata=pseudo_sc_adata, 
+            deseq_alpha=args.deseq_alpha,
+            num_threads=4,          # matches SLURM --ntasks
+            n_cpus_per_thread=16    # matches SLURM --cpus-per-task
+        )
+        print("Found these many differentially expressed genes:")
+        for key in diff_genes.keys():
+            print(key)
+            print(diff_genes[key].shape)
+        
+        # Create a JSON-serializable copy for dumping, but keep diff_genes as DataFrames
+        diff_genes_json = {
+            key: value.to_dict(orient='split') if isinstance(value, pd.DataFrame) else value
+            for key, value in diff_genes.items()
+    }
+    with open(genes_save_path, 'w') as file:
+        json.dump(diff_genes_json, file)
 
-    print("Calculate differential gene expression...")
-    # Calculate differentially expressed genes
-    diff_genes = differential_expression_analysis_parallel(sn_adata=pseudo_sn_adata,
-                                                            sc_adata=pseudo_sc_adata, 
-                                                            deseq_alpha=args.deseq_alpha,
-                                                            num_threads=4,          # matches SLURM --ntasks
-                                                            n_cpus_per_thread=16,   # matches SLURM --cpus-per-task
-                                                            )
-    print("Found these many differentially expressed genes:")
-    for key in diff_genes.keys():
-        print(key)
-        print(diff_genes[key].shape)
-    
     print(f"\n### Holdout experiment files... ###")
 
-    # 4) Now our experimental: For each cell type => hold out in SC, replace with SN in different ways ()
+    # 4) Now our experimental: For each cell type => hold out in SC, replace with SN in different ways
     for cell_type in cell_types:
 
         print(f"\nCreating refs for cell type: {cell_type}..")
 
         #### First our baseline datsets: ####
-
         # (A) SC minus the held-out cell type
         adata_sc_except_ct = adata_sc_ref[adata_sc_ref.obs["cell_types"] != cell_type].copy()
 
@@ -165,15 +229,16 @@ if __name__ == "__main__":
 
         ### 2) PCA-transformed SN ####
         ##############################
-        df_transformed_sn_ct = transform_heldout_sn_to_mean_sc(
+        df_transformed_sn_ct = transform_heldout_sn_to_mean_sc_local(
             sc_data=adata_sc_except_ct.to_df(),
             sn_data=adata_sn_except_ct.to_df(),
             sn_heldout_data=adata_sn_ct.to_df(),
             variance_threshold=0.75, 
             sc_celltype_labels=adata_sc_except_ct.obs["cell_types"].astype(str),
             sn_celltype_labels=adata_sn_except_ct.obs["cell_types"].astype(str),
-            heldout_label = cell_type
+            heldout_label = cell_type,
         )
+
         # Convert the DataFrame to an AnnData object. This is the PCA SN transformed.
         adata_sn_transformed = sc.AnnData(X=df_transformed_sn_ct.values)
         adata_sn_transformed.var_names = df_transformed_sn_ct.columns 
@@ -191,6 +256,7 @@ if __name__ == "__main__":
         sc_filtered, sn_filtered = remove_diff_genes(
             sc_adata=adata_sc_except_ct, sn_adata=adata_sn_ct, diff_genes=diff_genes_ct
         )
+        
         # Combine
         sc_plus_sn_deg = sc.concat([sc_filtered, sn_filtered], axis=0, merge="same")
         save_bayesprism_references(sc_plus_sn_deg, args.output_path, f"ref_{cell_type.replace(' ', '_')}_degSN")
@@ -206,7 +272,7 @@ if __name__ == "__main__":
         common_genes_pca = sn_filtered_for_pca.var_names.intersection(sc_filtered_for_pca.var_names)
         adata_sn_ct_filtered = adata_sn_ct[:, common_genes_pca].copy()
 
-        df_sn_transformed_deg = transform_heldout_sn_to_mean_sc(
+        df_sn_transformed_deg = transform_heldout_sn_to_mean_sc_local(
             sc_data=sc_filtered_for_pca.to_df(),
             sn_data=sn_filtered_for_pca.to_df(),
             sn_heldout_data=adata_sn_ct_filtered.to_df(),
@@ -225,39 +291,52 @@ if __name__ == "__main__":
         sc_plus_sn_deg_pca = sc.concat([sc_filtered_for_pca, adata_sn_transformed_deg], axis=0, merge="same")
         save_bayesprism_references(sc_plus_sn_deg_pca, args.output_path, f"ref_{cell_type.replace(' ', '_')}_degPCA_SN")
 
-        ### 5) VAE Transform ####
+        ### 5) VAE Transform (conditional) #### 
 
         # Create "training" AnnData: SC minus this cell type + SN minus this cell type ("testing" data is our missing ct)
         adata_train = sc.concat([adata_sc_except_ct, adata_sn_except_ct], axis=0)
         adata_train.obs_names_make_unique()
 
         # scVI setup
-        scvi.model.SCVI.setup_anndata(
-            adata_train,
-            batch_key="data_type"
-        )
+        # For the conditional model
+        adata_train_cond = sc.concat([adata_sc_except_ct, adata_sn_except_ct], axis=0)
+        adata_train_cond.obs_names_make_unique()
+        scvi.model.SCVI.setup_anndata(adata_train_cond, batch_key="data_type")
+        # Quick checks
+        print(adata_train_cond.obs["data_type"].unique())
+        print(adata_train_cond.obs["data_type"].dtype)
 
         # Define the model save path
-        model_save_path = f"{args.output_path}/scvi_trained_model_NO{cell_type}"
+        model_save_path = f"{args.output_path}/scvi_trained_model_NO{cell_type.replace(' ', '_')}"
 
         # Check if a trained model exists, training otherwise
         if os.path.exists(model_save_path):
             print(f"Loading pre-trained scVI model from {model_save_path}...")
-            model = scvi.model.SCVI.load(model_save_path, adata=adata_train)
+            model = scvi.model.SCVI.load(model_save_path, adata=adata_train_cond)
+            model.view_anndata_setup()
         else:
             # Training
-            model = scvi.model.SCVI(adata_train, dispersion="gene-batch", use_observed_lib_size=False, encode_covariates=True, deeply_inject_covariates=True )
-            model.train(max_epochs=300, train_size=0.8, early_stopping=True, early_stopping_patience=10)
-            # raise FileNotFoundError(f"No pre-trained scVI model found at {model_save_path}. Please train and save the model first.")
+            model = scvi.model.SCVI(adata_train_cond, encode_covariates=True, 
+                                                 deeply_inject_covariates=True,
+                                                 n_layers=2, 
+                                                 n_latent=30, dispersion='gene-batch',
+                                                 gene_likelihood="nb")
+            model.view_anndata_setup()
+            #model.train(max_epochs=300, train_size=0.8, early_stopping=True, early_stopping_patience=10)
+            model.train(early_stopping=True, early_stopping_patience=10)
 
-        # Transform the SN cells of the held-out type with this target library size
+        # Summation across genes => returns total counts per cell
+        median_sc_lib = calculate_median_library_size(adata_sc_except_ct)
+
+        # 3) scVI call with library_size
         transformed_expr = model.get_normalized_expression(
-            adata=adata_sn_ct,                
-            transform_batch="single_cell",    
-            # library_size parameter here will now use the latent estimates from scVI
+            adata=adata_sn_ct,
+            transform_batch="single_cell",
+            library_size=median_sc_lib,  # python float
             return_numpy=True
         )
-        # (Build an AnnData of the transformed SN cells
+
+        #  build an AnnData 
         adata_sn_transformed_scvi = sc.AnnData(X=transformed_expr)
         adata_sn_transformed_scvi.var_names = adata_sn_ct.var_names
         adata_sn_transformed_scvi.obs = adata_sn_ct.obs.copy()
@@ -270,7 +349,179 @@ if __name__ == "__main__":
         out_prefix = f"ref_{cell_type.replace(' ', '_')}_scviSN"
         save_bayesprism_references(sc_plus_sn_scvi, args.output_path, out_prefix)
 
-    print("Make pseudobulks...")
+        ### Latent space VAE Transform (not conditional) ####
+        ## 6: VAE latent space arithmetic transform :
+        del model
+
+        # Create "training" AnnData: SC minus this cell type + SN minus this cell type ("testing" data is our missing ct)
+        # For the non-conditional model
+        adata_train_notcond = sc.concat([adata_sc_except_ct, adata_sn_except_ct], axis=0)
+
+        for key in ["_scvi_batch", "_scvi_labels", "_scvi_size_factor", "_scvi_local_l_mean", "_scvi_local_l_var"]:
+            if key in adata_train_notcond.obs.columns:
+                adata_train_notcond.obs.pop(key)
+            if key in adata_train_notcond.uns:
+                adata_train_notcond.uns.pop(key)
+        for key in list(adata_train_notcond.obsm.keys()):
+            if "_scvi" in key:
+                del adata_train_notcond.obsm[key]
+        # Remove the batch column if it exists
+        if "data_type" in adata_train_notcond.obs.columns:
+            adata_train_notcond.obs.drop("data_type", axis=1, inplace=True)
+            
+        adata_train_notcond.obs_names_make_unique()
+        scvi.model.SCVI.setup_anndata(adata_train_notcond, batch_key=None)
+
+        # Define the model save path
+        model_save_path = f"{args.output_path}/scvi_notcond_trained_model_NO{cell_type.replace(' ', '_')}"
+
+        # Check if a trained model exists, training otherwise
+        if os.path.exists(model_save_path):
+            print(f"Loading pre-trained not conditional scVI model from {model_save_path}...")
+            model = scvi.model.SCVI.load(model_save_path, adata=adata_train_notcond)
+            model.view_anndata_setup()
+        else:
+            # Training
+            model = scvi.model.SCVI(adata_train_notcond, 
+                                    n_layers=2, 
+                                    n_latent=30, 
+                                    gene_likelihood="nb")
+            model.view_anndata_setup()
+            model.train(early_stopping=True, early_stopping_patience=10)
+
+        transformed_expr =  transform_heldout_sn_to_mean_sc_VAE(model=model,
+                                                            sc_adata = adata_sc_except_ct,
+                                                            sn_adata = adata_sn_except_ct,
+                                                            sn_heldout_adata = adata_sn_ct,
+                                                            heldout_label=cell_type)
+
+        # build an AnnData 
+        adata_sn_transformed_scvi_notcond = sc.AnnData(X=transformed_expr)
+        adata_sn_transformed_scvi_notcond.var_names = adata_sn_ct.var_names
+        adata_sn_transformed_scvi_notcond.obs = adata_sn_ct.obs.copy()
+
+        # Merge with SC minus the held-out cell -> final reference
+        sc_plus_sn_scvi = sc.concat([adata_sc_except_ct, adata_sn_transformed_scvi_notcond], axis=0, merge="same")
+
+        # Save for deconvolution, reference and trained model.
+        model.save(f"{args.output_path}/scvi_notcond_trained_model_NO{cell_type.replace(' ', '_')}", overwrite=True)
+        out_prefix = f"ref_{cell_type.replace(' ', '_')}_scvi_LSshift_SN"
+        save_bayesprism_references(sc_plus_sn_scvi, args.output_path, out_prefix)
+            
+        ############################################################################
+        ### (G) (-)DEG + SCVI transform (conditional) => ref_{ct}_degScviSN
+        ############################################################################
+
+        # 1) Filter SC minus hold-out + SN minus hold-out
+        sc_filtered_scvi, sn_filtered_scvi = remove_diff_genes(
+            sc_adata=adata_sc_except_ct,
+            sn_adata=adata_sn_except_ct,
+            diff_genes=diff_genes_ct
+        )
+
+        # 2) Subset the held-out SN cells to the same gene set
+        common_genes_scvi = sc_filtered_scvi.var_names.intersection(sn_filtered_scvi.var_names)
+        adata_sn_ct_filtered_scvi = adata_sn_ct[:, common_genes_scvi].copy()
+
+        # 3) Create the AnnData that the model expects (SC + SN, DEGs removed)
+        adata_train_deg_scvi = sc.concat([sc_filtered_scvi, sn_filtered_scvi], axis=0)
+        adata_train_deg_scvi.obs_names_make_unique()
+
+        scvi.model.SCVI.setup_anndata(
+            adata_train, batch_key="data_type"
+        )
+
+        # 4) Load the conditional scVI (DEG-filtered) model
+        deg_cond_model_path = f"{args.output_path}/scvi_NODEG_trained_model_NO{cell_type.replace(' ', '_')}"
+        if os.path.exists(deg_cond_model_path):
+            print(f"Loading deg conditional scVI model from: {deg_cond_model_path}")
+            model_deg_cond = scvi.model.SCVI.load(deg_cond_model_path, adata=adata_train_deg_scvi)
+            
+        else:
+            # Training
+            model_deg_cond = scvi.model.SCVI(adata_train_deg_scvi, encode_covariates=True, 
+                                                 deeply_inject_covariates=True,
+                                                 n_layers=2, 
+                                                 n_latent=30, dispersion='gene-batch',
+                                                 gene_likelihood="nb")
+            model_deg_cond.view_anndata_setup()
+            model_deg_cond.train(early_stopping=True, early_stopping_patience=10)
+
+        # 5) Compute library size from SC minus holdout (DEG-filtered)
+        median_sc_lib_deg = calculate_median_library_size(sc_filtered_scvi)
+
+        # 6) Transform the held-out SN data
+        transformed_expr_deg = model_deg_cond.get_normalized_expression(
+            adata=adata_sn_ct_filtered_scvi,
+            transform_batch="single_cell",
+            library_size=median_sc_lib_deg,
+            return_numpy=True
+        )
+
+        # 7) Build an AnnData for the transformed held-out SN
+        adata_sn_deg_cond_transform = sc.AnnData(X=transformed_expr_deg)
+        adata_sn_deg_cond_transform.var_names = adata_sn_ct_filtered_scvi.var_names
+        adata_sn_deg_cond_transform.obs = adata_sn_ct_filtered_scvi.obs.copy()
+
+        # 8) Concatenate with the SC (DEG-filtered)
+        sc_plus_sn_deg_cond_scvi = sc.concat([sc_filtered_scvi, adata_sn_deg_cond_transform], axis=0, merge="same")
+
+        # 9) Save the reference
+        out_prefix_deg_cond = f"ref_{cell_type.replace(' ', '_')}_degScviSN"
+        save_bayesprism_references(sc_plus_sn_deg_cond_scvi, args.output_path, out_prefix_deg_cond)
+        model_deg_cond.save(deg_cond_model_path, overwrite=True)
+
+        ############################################################################
+        ### (H) (-)DEG + SCVI latent neighbor transform (non-conditional) => ref_{ct}_degScviLSshift_SN
+        ############################################################################
+
+        # Reuse sc_filtered_scvi, sn_filtered_scvi, and adata_sn_ct_filtered_scvi from above
+
+        # 1) Create the AnnData used for the non-conditional scVI model (DEG-filtered)
+        adata_train_deg_notcond = sc.concat([sc_filtered_scvi, sn_filtered_scvi], axis=0)
+        adata_train_deg_notcond.obs_names_make_unique()
+
+        scvi.model.SCVI.setup_anndata(adata_train_deg_notcond, batch_key=None)
+
+        # 2) Load the non-conditional scVI (DEG-filtered) model
+        deg_notcond_model_path = f"{args.output_path}/scvi_NODEG_notcond_trained_model_NO{cell_type.replace(' ', '_')}"
+        if os.path.exists(deg_notcond_model_path):
+            print(f"Loading deg non-conditional scVI model from: {deg_notcond_model_path}")
+            model_deg_notcond = scvi.model.SCVI.load(deg_notcond_model_path, adata=adata_train_deg_notcond)
+        else:
+            # Training
+            model_deg_notcond = scvi.model.SCVI(adata_train_deg_scvi, 
+                                                 n_layers=2, 
+                                                 n_latent=30, 
+                                                 gene_likelihood="nb")
+            model_deg_notcond.view_anndata_setup()
+            model_deg_notcond.train(early_stopping=True, early_stopping_patience=10)
+
+        # 3) Apply the local latent shift function
+        #    (We assume you have transform_heldout_sn_to_mean_sc_VAE(...) defined in your script)
+        df_transformed_deg_notcond = transform_heldout_sn_to_mean_sc_VAE(
+            model=model_deg_notcond,
+            sc_adata=sc_filtered_scvi,
+            sn_adata=sn_filtered_scvi,
+            sn_heldout_adata=adata_sn_ct_filtered_scvi,
+            heldout_label=cell_type,
+            k_neighbors=10  # or whatever you set
+        )
+
+        # 4) Build the final AnnData
+        adata_sn_deg_notcond_LS = sc.AnnData(X=df_transformed_deg_notcond.values)
+        adata_sn_deg_notcond_LS.var_names = adata_sn_ct_filtered_scvi.var_names
+        adata_sn_deg_notcond_LS.obs = adata_sn_ct_filtered_scvi.obs.copy()
+
+        # 5) Concatenate with SC (DEG-filtered)
+        sc_plus_sn_deg_notcond_LS = sc.concat([sc_filtered_scvi, adata_sn_deg_notcond_LS], axis=0, merge="same")
+
+        # 6) Save the reference
+        out_prefix_deg_notcond = f"ref_{cell_type.replace(' ', '_')}_degScviLSshift_SN"
+        save_bayesprism_references(sc_plus_sn_deg_notcond_LS, args.output_path, out_prefix_deg_notcond)
+        model_deg_notcond.save(deg_notcond_model_path, overwrite=True)
+
+    print("Making pseudobulks...")
     # Generate pseudobulks
     pseudobulk_config = eval(args.pseudobulks_props)
     pseudobulks_df, proportions_df = make_pseudobulks(adata_sc_pseudo, pseudobulk_config, args.num_cells, args.noise, cell_types=cell_types)
@@ -286,4 +537,3 @@ if __name__ == "__main__":
         raise ValueError('deconvolution_methods must be "bayesprism" (others not supported yet.)')
 
     print("\n=== Holdout experiment files completed. ===")
-
