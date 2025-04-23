@@ -5,5 +5,5 @@
 The aim is to find a method of normalization or transformation that can be applied to single-nucleus RNA sequencing dataset, improving deconvolution.
 
 ## The following files are currently in the repository:
-### 1. run_prep_all.sh: Bash script to run the file below (prepare_deconvolution.py)
-### 2. prepare_deconvolution.py: Python script to prepare the files for deconvolution.
+### 1. 0_preprocess_data.sh: does the sc and sc preprocessing/QC for all datasets.
+### 2. 1_run_prep_all.sh: prepares the files for deconvolution experiment with holding out cells.
