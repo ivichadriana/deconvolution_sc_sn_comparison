@@ -48,7 +48,7 @@ output_path="${output_root}/${res_name}"
 mkdir -p "$output_path"
 
 echo "****** Running prepare_deconvolution.py for ${res_name} ******"
-python "${BASE_DIR}/scripts/prepare_deconvolution.py" \
+python "${BASE_DIR}/scripts/prepare_deconvolution_sim.py" \
     --res_name="$res_name" \
     --data_path="$data_path" \
     --output_path="$output_path" \
