@@ -50,7 +50,6 @@ import scanpy as sc
 import pandas as pd
 import numpy as np
 import os
-import sys
 import gc
 from scipy.sparse import issparse
 from multiprocessing import Pool
@@ -101,12 +100,6 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-
-    def load_best_config(res_name, output_path):
-        best_config_file = f"{output_path}/best_config_scvi_tune.json"
-        with open(best_config_file, "r") as f:
-            best_config = json.load(f)
-        return best_config
 
     # 1) Load data
     print("Preparing data...")
@@ -285,7 +278,7 @@ if __name__ == "__main__":
             )
 
     print(
-        f"\nTraining all EG genes: NOT conditional models models for cell type: {cell_type}.."
+        f"\nTraining all EG genes: NOT conditional models for cell type: {cell_type}.."
     )
 
     for cell_type in cell_types:
