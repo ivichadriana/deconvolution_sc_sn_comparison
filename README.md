@@ -4,10 +4,10 @@ The aim of this research project is to evaluate methods of transformation that c
 
 # **Reproducing the results**
 
-- Fork or branch and clone the repository. [Github has many tutorials on this](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository)
+- Fork or branch and clone the repository. [Github has many tutorials on this](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
 - Run the (bash script to create the conda environments)[/environments/create_env.sh] needed.
     This creates the conda environments from the (enviornments folder)[/environments/] using the yml files (two environments, one for R (env_deconv_r) and one for Python (env_deconv)). 
-- Download the data we use, putting in the appropiate folder (data/ID). All data is publicly available and easily downloadable. All links and details can be found on the Excel sheet [here](data/details/Data_Details.xlsx) - same Esxcel is also a supplemental figure on paper.
+- Download the data we use, putting in the appropiate folder (data/ID). All data is publicly available and easily downloadable. All links and details can be found on the Excel sheet [here](data/details/Data_Details.xlsx) - same sheet is also a supplemental figure on paper.
 -  After downaloading the data, run the shell scripts, in order:
     - [0_preprocess_data.sh](scripts/0_preprocess_data.sh)
         - Runs [preprocessing notebooks](notebooks/). Preprocessing and QC for all datasets. 
@@ -38,8 +38,11 @@ Example on running bash on HPC:
 ## **Instructions for adding more data to the analysis:**
 - Start by preprocessing single cell and single nucleus datasets. You can add our own Jupyter notebook to the [notebooks folder](notebooks). Then, run the [preprocessing shell](scripts/0_preprocess_data.sh). Choose a new identifier for your dataset, add it to the data folder: data/YOURS.
 - After, it's just a matter of adding your new dataset identifier to the shell scripts:
+
 Example:
 > datasets=("ADP" "PBMC" "MBC" "MSB") to datasets=("ADP" "PBMC" "MBC" "MSB" "YOURS")
+
 - If you only want to add data to the "real bulk" analysis, add it to the shell scripts that contain "Real_ADP", and add a array to the job at the top (we only use one real bulk dataset):
+
 Example:
 > dataset=("Real_ADP") to dataset=("Real_ADP" "YOURS)
