@@ -10,6 +10,9 @@
 # We parallelize the IntaPrism function with n.cores in the slurm.
 # ============================================================
 
+# --------------------------------------------------------------------
+# Settings (add your transform name here!) (if human specific, add to human.)
+# --------------------------------------------------------------------
 transformations_not_human =  c(
   "rawSN",
   "pcaSN",

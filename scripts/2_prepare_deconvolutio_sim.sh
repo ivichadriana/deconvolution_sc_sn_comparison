@@ -1,8 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=Train_nodeg
+#SBATCH --job-name=Prep_deconvolution_files
 #SBATCH --account=amc-general
-#SBATCH --output=output_Train_nodeg_%A_%a.log
-#SBATCH --error=error_Train_nodeg_%A_%a.log 
+#SBATCH --output=output_%A_%a.log
+#SBATCH --error=error_%A_%a.log 
+#SBATCH --mail-type=ALL
+#SBATCH --partition=amilan
 #SBATCH --qos=normal
 #SBATCH --time=24:00:00                              
 #SBATCH --nodes=1
@@ -43,18 +45,15 @@ echo "****** Running dataset: ${res_name} ******"
 output_path="${output_root}/${res_name}"
 mkdir -p "$output_path"
 
-echo "****** Running train_scvi_models_allgenes.py for ${res_name} ******"
-python "${BASE_DIR}/scripts/train_scvi_models_allgenes.py" \
+echo "****** Running prepare_deconvolution.py for ${res_name} ******"
+python "${BASE_DIR}/scripts/prepare_deconvolution_sim.py" \
     --res_name="$res_name" \
     --data_path="$data_path" \
     --output_path="$output_path" \
-    --deseq_alpha="$deseq_alpha"
-
-echo "****** Running train_scvi_models_nodeg.py for ${res_name} ******"
-python "${BASE_DIR}/scripts/train_scvi_models_nodeg.py" \
-    --res_name="$res_name" \
-    --data_path="$data_path" \
-    --output_path="$output_path" \
+    --pseudobulks_props="$pseudobulks_props" \
+    --num_cells="$num_cells" \
+    --noise="$noise" \
+    --deconvolution_method="$deconvolution_method" \
     --deseq_alpha="$deseq_alpha"
 
 conda deactivate
