@@ -23,7 +23,7 @@ The aim of this research project is to evaluate methods of transformation that c
 - You can look at the results in the results notebooks after! All plots included in all figures of the paper will be available in these.
 
 Example on running bash on HPC: 
-> sbatch sciripts/0_preprocess_data.sh
+> sbatch scripts/0_preprocess_data.sh
 
 # Contribute to the research!
 

@@ -10,7 +10,7 @@
 #SBATCH --nodes=1  # Use a single node
 
 # Define the datasets
-DATASETS=("ADP" "MSB" "MBC" "PBMC")  # List your datasets here
+datasets=("ADP" "MSB" "MBC" "PBMC")  # List your datasets here
 
 # Activate Conda environment with R
 source ~/.bashrc
