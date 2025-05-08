@@ -10,6 +10,31 @@
 # We parallelize the IntaPrism function with n.cores in the slurm.
 # ============================================================
 
+transformations_not_human =  c(
+  "rawSN",
+  "pcaSN",
+  "degSN",
+  "degRandSN",
+  "degPCA_SN",
+  "scviSN",
+  "scvi_LSshift_SN",   
+  "degScviSN",         
+  "degScviLSshift_SN"  
+)
+transformations_human =  c(
+  "rawSN",
+  "pcaSN",
+  "degSN",
+  "degIntSN",
+  "degRandSN",
+  "degOtherSN",
+  "degPCA_SN",
+  "scviSN",
+  "scvi_LSshift_SN",   
+  "degScviSN",         
+  "degScviLSshift_SN"  
+)
+
 # Avoid interactive repository prompts
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 
@@ -121,16 +146,12 @@ cat("\nUnique cell types in sc_raw:", unique_cell_types, "\n")
 #   ref_<CELLTYPE>_<transform>_signal.csv
 #   ref_<CELLTYPE>_<transform>_cell_state.csv
 # where <transform> is one of: rawSN, pcaSN, degSN, degPCA_SN or scviSN
-transformations <- c(
-  "rawSN",
-  "pcaSN",
-  "degSN",
-  "degPCA_SN",
-  "scviSN",
-  "scvi_LSshift_SN",   # new
-  "degScviSN",         # new
-  "degScviLSshift_SN"  # new
-)
+
+if (data_type != "MSB") {
+  transformations <- transformations_human 
+} else {
+  transformations <- transformations_not_human 
+}
 # --- 4) Loop over each cell type & each transformation ---
 for(ct in unique_cell_types) {
   # sanitize
@@ -178,7 +199,7 @@ for(ct in unique_cell_types) {
     )
 
     # Run InstaPrism
-    results <- InstaPrism(bulk_Expr=mixture_sub, refPhi_cs=refPhi_obj, n.iter = 5000, n.core = 16)
+    results <- InstaPrism(bulk_Expr=mixture_sub, refPhi_cs=refPhi_obj, n.iter = 5000, n.core = 8)
     
     # Save output
     cell_frac <- results@Post.ini.cs@theta
