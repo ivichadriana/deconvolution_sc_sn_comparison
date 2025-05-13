@@ -12,8 +12,8 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --array=0-3
 
-# Exit if any command fails
-set -e
+# Define the datasets
+datasets=("ADP" "MSB" "MBC" "PBMC")  # List your datasets here
 
 # Get the directory of this script and define base paths relative to it
 SCRIPT_DIR=$(dirname "$(realpath "$0")")
@@ -38,8 +38,6 @@ noise=True
 deconvolution_method="bayesprism"
 deseq_alpha=0.01
 
-# List of dataset names
-datasets=("ADP" "PBMC" "MBC" "MSB")
 # Select the dataset for this array task
 res_name=${datasets[$SLURM_ARRAY_TASK_ID]}
 
