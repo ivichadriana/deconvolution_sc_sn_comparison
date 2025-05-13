@@ -19,6 +19,8 @@ The aim of this research project is to evaluate methods of transformation that c
         - Runs [script for deconvolution](scripts/BayesPrism_sim.R) through BayesPrism/InstaPrism using the references and pseudobulks created on 2.Tutorials on InstaPrism available [here](https://github.com/humengying0907/InstaPrismSourceCode).
     - [4_process_results_sim.sh](scripts/4_process_results_sim.sh)
         - Runs [script to process the results from deconvolution](scripts/process_results.py) (only of simulation), computes RMSE and Pearson, and puts it in a format for analysis.
+    - [5_results_notebook_sim.sh](scripts/5_results_notebook_sim.sh)
+        - Runs [notebook to visualize the results from the simulations deconvolution](notebook/results_sim.ipynb). Includes plots from paper's figures.
 
 - You can look at the results in the results notebooks after! All plots included in all figures of the paper will be available in these.
 
