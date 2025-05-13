@@ -46,3 +46,7 @@ Example:
 
 Example:
 > dataset=("Real_ADP") to dataset=("Real_ADP" "YOURS)
+
+## **Data Access and Processing**
+
+Please download the Excel sheet: [data/details/Data_Details.xlsx](Data_Details.xlsx)
