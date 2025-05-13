@@ -6,9 +6,9 @@ The aim of this research project is to evaluate methods of transformation that c
 
 - Fork or branch and clone the repository. [Github has many tutorials on this](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
 - Run the (bash script to create the conda environments)[/environments/create_env.sh] needed.
-    This creates the conda environments from the (enviornments folder)[/environments/] using the yml files (two environments, one for R (env_deconv_r) and one for Python (env_deconv)). 
+    This creates the conda environments from the (environments folder)[/environments/] using the yml files (two environments, one for R (env_deconv_r) and one for Python (env_deconv)). 
 - Download the data we use, putting in the appropiate folder (data/ID). All data is publicly available and easily downloadable. All links and details can be found on the Excel sheet [here](data/details/Data_Details.xlsx) - same sheet is also a supplemental figure on paper.
--  After downaloading the data, run the shell scripts, in order:
+-  After downloading the data, run the shell scripts, in order:
     - [0_preprocess_data.sh](scripts/0_preprocess_data.sh)
         - Runs [preprocessing notebooks](notebooks/). Preprocessing and QC for all datasets. 
     - [1_train_scvi_models_sim.sh](scripts/1_train_scvi_models_sim.sh) 
@@ -29,7 +29,7 @@ Example on running bash on HPC:
 
 ## **Instructions for adding your own method to the analysis:**
 - Preprocess data [as usual](scripts/0_preprocess_data.sh) (if you want to add more data, see instructions below). 
-- If your method requieres training, you can add the training code to the [same script where we train scVI models](scripts/train_scvi_models_allgenes.py). You can also train idependently.
+- If your method requieres training, you can add the training code to the [same script where we train scVI models](scripts/train_scvi_models_allgenes.py). You can also train independently.
 - You can now create references for deconvolution with your method:
     - Add your transformation to the same datasets as seen in the [simulations script](scripts/prepare_deconvolution_sim.py) See where we highlight "Add your transformation here!" line 698.
 
