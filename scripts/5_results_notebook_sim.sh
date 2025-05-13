@@ -32,7 +32,7 @@ output_notebook=${nb_path}/results_sim.ipynb
 
 ##########################               EXECUTION             #########################################
 
-echo "****** Running dataset: ${res_name} ******"
+echo "****** Running notebook: ******"
 
 papermill "$input_notebook" "$output_notebook"
             
