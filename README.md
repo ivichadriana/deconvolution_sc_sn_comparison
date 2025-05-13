@@ -7,7 +7,7 @@ The aim of this research project is to evaluate methods of transformation that c
 - Fork or branch and clone the repository. [Github has many tutorials on this](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
 - Run the [bash script to create the conda environments](/environments/create_env.sh) needed.
     This creates the conda environments from the [environments folder](/environments/) using the yml files (two environments, one for R (env_deconv_r) and one for Python (env_deconv)). 
-- Download the data we use, putting in the appropiate folder (data/ID). All data is publicly available and easily downloadable. All links and details can be found on the Excel sheet [here](data/details/Data_Details.xlsx) - same sheet is also a supplemental figure on paper.
+- Download the data we use, putting in the appropiate folder (data/ID). All data is publicly available and easily downloadable. All links and details can be found on the Excel sheet [here](data/details/Data_Details.xlsx).
 -  After downloading the data, run the shell scripts, in order:
     - [0_preprocess_data.sh](scripts/0_preprocess_data.sh)
         - Runs [preprocessing notebooks](notebooks/). Preprocessing and QC for all datasets. 
@@ -18,7 +18,7 @@ The aim of this research project is to evaluate methods of transformation that c
     - [3_run_bayesprism](scripts/3_run_bayesprism_sim.sh)
         - Runs [script for deconvolution](scripts/BayesPrism_sim.R) through BayesPrism/InstaPrism using the references and pseudobulks created on 2.Tutorials on InstaPrism available [here](https://github.com/humengying0907/InstaPrismSourceCode).
     - [4_process_results_sim.sh](scripts/4_process_results_sim.sh)
-        - Runs (script to process the results from deconvolution)[scripts/process_results.py] (only of simulation), computes RMSE and Pearson, and puts it in a format for analysis.
+        - Runs [script to process the results from deconvolution](scripts/process_results.py) (only of simulation), computes RMSE and Pearson, and puts it in a format for analysis.
 
 - You can look at the results in the results notebooks after! All plots included in all figures of the paper will be available in these.
 
@@ -49,4 +49,4 @@ Example:
 
 ## **Data Access and Processing**
 
-Please download the Excel sheet: [data/details/Data_Details.xlsx](Data_Details.xlsx)
+Please download the Excel sheet: [data/details/Data_Details.xlsx](Data_Details.xlsx). This contains all links, names, filtering steps, and detials ona ll datasets used.
