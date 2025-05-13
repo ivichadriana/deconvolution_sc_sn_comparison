@@ -29,7 +29,6 @@ data_type <- args[1]
 # --- Set up directories ---
 script_dir <- getwd() # or another logic to detect your script location
 bulks_path <- import_path <- file.path(script_dir, "..", "data", "deconvolution", data_type)
-import_path <- file.path(script_dir, "..", "data", "deconvolution", data_type)
 export_path <- file.path(script_dir, "..", "results", data_type)
 cat("Import path:", import_path, "\n")
 cat("Export path:", export_path, "\n")
