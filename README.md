@@ -5,18 +5,18 @@ The aim of this research project is to evaluate methods of transformation that c
 # **Reproducing the results**
 
 - Fork or branch and clone the repository. [Github has many tutorials on this](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
-- Run the (bash script to create the conda environments)[/environments/create_env.sh] needed.
-    This creates the conda environments from the (environments folder)[/environments/] using the yml files (two environments, one for R (env_deconv_r) and one for Python (env_deconv)). 
+- Run the [bash script to create the conda environments](/environments/create_env.sh) needed.
+    This creates the conda environments from the [environments folder](/environments/) using the yml files (two environments, one for R (env_deconv_r) and one for Python (env_deconv)). 
 - Download the data we use, putting in the appropiate folder (data/ID). All data is publicly available and easily downloadable. All links and details can be found on the Excel sheet [here](data/details/Data_Details.xlsx) - same sheet is also a supplemental figure on paper.
 -  After downloading the data, run the shell scripts, in order:
     - [0_preprocess_data.sh](scripts/0_preprocess_data.sh)
         - Runs [preprocessing notebooks](notebooks/). Preprocessing and QC for all datasets. 
     - [1_train_scvi_models_sim.sh](scripts/1_train_scvi_models_sim.sh) 
-        - Runs [training scripts](scripts/train_scvi_models_allgenes.py) Trains scVI models (conditional and not conditional), with and without genes.
+        - Runs [training scripts](scripts/train_scvi_models_allgenes.py) Trains scVI models (conditional and not conditional), with and without groups of differentially expressed genes.
     - [2_prepare_deconvolution_sim.sh](scripts/2_prepare_deconvolution_sim.sh) 
         - Runs [script to prepare files for deconvolution](scripts/prepare_deconvolution_sim.py) (only simulations). Files needed are one reference for each transform, where we transform one cell type at a time. 
     - [3_run_bayesprism](scripts/3_run_bayesprism_sim.sh)
-        - Runs (script for deconvolution)[BayesPrism_sim.R] through BayesPrism/InstaPrism using the references and pseudobulks created on 2.Tutorials on InstaPrism available [here](https://github.com/humengying0907/InstaPrismSourceCode).
+        - Runs [script for deconvolution](scripts/BayesPrism_sim.R) through BayesPrism/InstaPrism using the references and pseudobulks created on 2.Tutorials on InstaPrism available [here](https://github.com/humengying0907/InstaPrismSourceCode).
     - [4_process_results_sim.sh](scripts/4_process_results_sim.sh)
         - Runs (script to process the results from deconvolution)[scripts/process_results.py] (only of simulation), computes RMSE and Pearson, and puts it in a format for analysis.
 
