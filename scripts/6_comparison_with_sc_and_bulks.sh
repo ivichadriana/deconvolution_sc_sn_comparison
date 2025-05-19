@@ -48,7 +48,7 @@ output_notebook=${nb_path}/results_sc_comparison.ipynb
 
 ##########################               EXECUTION             #########################################
 
-echo "****** Running notebookof sc similarity: ******"
+echo "****** Running notebook of sc similarity: ******"
 
 papermill "$input_notebook" "$output_notebook"
 ##########################################################################################################
