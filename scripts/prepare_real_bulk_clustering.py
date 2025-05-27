@@ -136,38 +136,32 @@ all_de_genes_list = list(dict.fromkeys(flattened_index))
 print("Total unique DEGs:", len(all_de_genes_list))
 
 ## And removing
-sc_adata_nodeg = sc_adata[:, ~sc_adata.var_names.isin(all_de_genes_list)].copy()
-sn_adata_nodeg = sn_adata[:, ~sn_adata.var_names.isin(all_de_genes_list)].copy()
 
-sn_missing_nodeg = {}
-sn_missing_nodeg[0] = sn_missing[0][
-    :, ~sn_missing[0].var_names.isin(all_de_genes_list)
-].copy()
-sn_missing_nodeg[1] = sn_missing[1][
-    :, ~sn_missing[1].var_names.isin(all_de_genes_list)
-].copy()
+def remove_degs_from_adata(adata, degs):
+    """
+    Removes differentially expressed genes from an AnnData object.
 
-sc_adata_train_nodeg = sc_adata_train[
-    :, ~sc_adata_train.var_names.isin(all_de_genes_list)
-].copy()
-sn_adata_train_nodeg = sn_adata_train[
-    :, ~sn_adata_train.var_names.isin(all_de_genes_list)
-].copy()
+    Parameters:
+    - adata: AnnData object
+    - degs: list of gene names (strings) to remove
 
-print(sc_adata.shape)
-print(sc_adata_nodeg.shape)
+    Returns:
+    - New AnnData object with DEGs removed
+    """
+    filtered = adata[:, ~adata.var_names.isin(degs)].copy()
+    print(adata.shape)
+    print(filtered.shape)
+    return filtered
 
-print(sn_adata.shape)
-print(sn_adata_nodeg.shape)
+sc_adata_nodeg = remove_degs_from_adata(sc_adata, all_de_genes_list)
+sn_adata_nodeg = remove_degs_from_adata(sn_adata, all_de_genes_list)
+sc_adata_train_nodeg = remove_degs_from_adata(sc_adata_train, all_de_genes_list)
+sn_adata_train_nodeg = remove_degs_from_adata(sn_adata_train, all_de_genes_list)
 
-print(sn_adata_train.shape)
-print(sn_adata_train_nodeg.shape)
-
-print(sc_adata_train.shape)
-print(sc_adata_train_nodeg.shape)
-
-print(sn_missing[0].shape)
-print(sn_missing_nodeg[0].shape)
+sn_missing_nodeg = {
+    0: remove_degs_from_adata(sn_missing[0], all_de_genes_list),
+    1: remove_degs_from_adata(sn_missing[1], all_de_genes_list),
+}
 
 ## And the next 2 models without DEG:
 model_save_path = (
