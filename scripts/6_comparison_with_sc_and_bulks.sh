@@ -22,7 +22,7 @@ output_path="${output_root}/${res_name}"
 mkdir -p "$output_path"
 
 echo "****** Running prepare_real_bulk_clustering.py ******"
-python "${BASE_DIR}/scripts/prepare_real_bulk_clustering.py" \
+python "${BASE_DIR}/scripts/prepare_real_bulk_clustering.py"
 
 # Define relative data and output paths
 nb_path="${BASE_DIR}/notebooks"
@@ -48,7 +48,7 @@ output_notebook=${nb_path}/results_sc_comparison.ipynb
 
 ##########################               EXECUTION             #########################################
 
-echo "****** Running notebookof sc similarity: ******"
+echo "****** Running notebook of sc similarity: ******"
 
 papermill "$input_notebook" "$output_notebook"
 ##########################################################################################################
