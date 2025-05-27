@@ -7,23 +7,16 @@ realistic and random pseudobulk mixtures. The resulting pseudobulks are saved fo
 and benchmarking of deconvolution methods.
 """
 
-import os, re, glob, sys
-import pickle
-import numpy as np
-import scvi
-import pandas as pd
-import seaborn as sns
+import os
+import sys
 import json
+import numpy as np
+import pandas as pd
 import anndata
 import scanpy as sc
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-from scipy.spatial.distance import cdist
+import scvi
 import matplotlib.pyplot as plt
-from scipy.stats import pearsonr, spearmanr
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 
 sys.path.insert(1, "../../")
 sys.path.insert(1, "../")
