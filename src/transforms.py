@@ -237,7 +237,6 @@ def get_normalized_expression_from_latent(
     - The shape of `latent` must be `(n_cells, n_latent)`.
     """
     device = next(model.module.decoder.parameters()).device
-    dispersion_mode = model.module.dispersion
     # 1) Ensure 'latent' is on the correct device, shape=(n_cells, n_latent)
     if not torch.is_tensor(latent):
         latent_tensor = torch.tensor(latent, dtype=torch.float32, device=device)
