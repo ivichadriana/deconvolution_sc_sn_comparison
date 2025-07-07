@@ -121,9 +121,9 @@ def transform_heldout_sn_to_mean_sc_VAE(
         .intersection(sn_adata.var_names)
         .intersection(sn_heldout_adata.var_names)
     )
-    sc_adata = sc_adata[:, list(common_genes)].copy()
-    sn_adata = sn_adata[:, list(common_genes)].copy()
-    sn_heldout_adata = sn_heldout_adata[:, list(common_genes)].copy()
+    sc_adata = sc_adata[:, sorted(common_genes)].copy()
+    sn_adata = sn_adata[:, sorted(common_genes)].copy()
+    sn_heldout_adata = sn_heldout_adata[:, sorted(common_genes)].copy()
 
     sc_celltype_labels = sc_adata.obs["cell_types"].astype(str)
     sn_celltype_labels = sn_adata.obs["cell_types"].astype(str)
