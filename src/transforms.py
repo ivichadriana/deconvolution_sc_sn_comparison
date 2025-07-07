@@ -45,8 +45,6 @@ import pandas as pd
 from numpy.linalg import norm
 from scipy.stats import pearsonr
 from sklearn.metrics import root_mean_squared_error
-import matplotlib.pyplot as plt
-import seaborn as sns
 import os
 import gc
 from multiprocessing import Pool
