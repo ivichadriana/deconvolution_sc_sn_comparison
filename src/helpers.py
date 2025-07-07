@@ -783,15 +783,15 @@ def load_OVC_data(data_type: str, load_testing: bool = False):
         meta_data = sc_metadata
 
     elif data_type == "single_nucleus":
-        if load_testing: ## this is the CST
-            # File paths
-            h5_gz_file = Path(base_path, "GSM4186987_HTAPP-316-SMP-991_CST_channel1_raw_gene_bc_matrices_h5.h5.gz")
-            h5_file = Path(base_path, "GSM4186987_HTAPP-316-SMP-991_CST_channel1_raw_gene_bc_matrices_h5.h5")
-            csv_file = Path(base_path, "GSM4186987_metadata_HTAPP-316-SMP-991_CST_channel1.csv.gz")
-        else: ## this is the TST
-            h5_gz_file = Path(base_path, "GSM4186987_HTAPP-316-SMP-991_TST_channel1_raw_gene_bc_matrices_h5.h5.gz")
-            h5_file = Path(base_path, "GSM4186987_HTAPP-316-SMP-991_TST_channel1_raw_gene_bc_matrices_h5.h5")
-            csv_file = Path(base_path, "GSM4186987_metadata_HTAPP-316-SMP-991_TST_channel1.csv.gz")
+        # if load_testing: ## this is the CST
+        #     # File paths
+        #     h5_gz_file = Path(base_path, "GSM4186987_HTAPP-316-SMP-991_CST_channel1_raw_gene_bc_matrices_h5.h5.gz")
+        #     h5_file = Path(base_path, "GSM4186987_HTAPP-316-SMP-991_CST_channel1_raw_gene_bc_matrices_h5.h5")
+        #     csv_file = Path(base_path, "GSM4186987_metadata_HTAPP-316-SMP-991_CST_channel1.csv.gz")
+        # else: ## this is the TST
+        h5_gz_file = Path(base_path, "GSM4186987_HTAPP-316-SMP-991_CST_channel1_raw_gene_bc_matrices_h5.h5.gz")
+        h5_file = Path(base_path, "GSM4186987_HTAPP-316-SMP-991_CST_channel1_raw_gene_bc_matrices_h5.h5")
+        csv_file = Path(base_path, "GSM4186987_metadata_HTAPP-316-SMP-991_CST_channel1.csv.gz")
 
         # Decompressing the h5.gz file
         with gzip.open(h5_gz_file, "rb") as f_in:

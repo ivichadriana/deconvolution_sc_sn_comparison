@@ -100,7 +100,6 @@ if mode == "perdonor":
 else:
     donor_list = []
 
-
 # --------------------------------------------------------------------
 # 4) Filename parser
 # --------------------------------------------------------------------
@@ -177,6 +176,9 @@ for fp in bp_files:
 
     # ground-truth or placeholder
     if mode == "simulation":
+        # harmonise sample IDs: strip the leading "X" that R adds
+        pred.index  = pred.index.str.lstrip("X").astype(str)
+        true_props_master.index = true_props_master.index.astype(str)
         # align only overlapping
         common_idx = pred.index.intersection(true_props_master.index)
         common_cols = pred.columns.intersection(true_props_master.columns)
@@ -199,9 +201,21 @@ for fp in bp_files:
         .melt(id_vars="index", var_name="CellType", value_name="TrueProp")
         .rename(columns={"index": "SampleID"})
     )
+
+    # -------------------------------------------------------------
+    # Derive the held-out cell type from the filename, if any
+    # -------------------------------------------------------------
+    holdout = "None"
+    core = os.path.basename(fp).replace("_BayesPrism_proportions.csv", "")
+    if core.startswith("ref_") and trans in valid_transforms:
+        # ref_<CELLTYPE>_<TRANSFORM>
+        tail = core[4:]                         # strip "ref_"
+        cell_part = tail[: -(len(trans) + 1)]   # drop "_<TRANSFORM>"
+        holdout = cell_part.replace("_", " ")   # restore spaces
+        
     merged = pl.merge(tl, on=["SampleID", "CellType"])
     merged["Transform"] = trans
-    merged["HoldoutCell"] = "None"
+    merged["HoldoutCell"] = holdout
     merged["Donor"] = donor or "None"
     eval_records.append(merged)
 

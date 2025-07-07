@@ -21,6 +21,12 @@ echo "****** Running dataset: ${res_name} ******"
 output_path="${output_root}/${res_name}"
 mkdir -p "$output_path"
 
+##########################################################################################################
+##########################                Two SCRIPTS             #########################################
+
+echo "****** Running process_bulks_train_models.py ******"
+python "${BASE_DIR}/scripts/process_bulks_train_models.py" 
+
 echo "****** Running prepare_real_bulk_clustering.py ******"
 python "${BASE_DIR}/scripts/prepare_real_bulk_clustering.py"
 
