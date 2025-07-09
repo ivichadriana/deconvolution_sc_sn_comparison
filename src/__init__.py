@@ -21,3 +21,5 @@ logger.addHandler(ch)
 logger.propagate = False
 
 from .helpers import *
+from .deg_funct import *
+from .transforms import *

@@ -70,6 +70,9 @@ num_rand = 100
 num_realistic = 100
 num_cells = 1000
 
+pseudobulk_dict = {}
+pseudobulk_nodeg_dict = {}
+
 bulk_df, sc_adata, sn_adata, sn_missing = open_adipose_datasets_all(
     res_name="ADP", base_dir=base_dir
 )
@@ -136,7 +139,6 @@ all_de_genes_list = list(dict.fromkeys(flattened_index))
 print("Total unique DEGs:", len(all_de_genes_list))
 
 ## And removing
-
 def remove_degs_from_adata(adata, degs):
     """
     Removes differentially expressed genes from an AnnData object.
@@ -344,7 +346,7 @@ scvi_ls_nodeg_adata = sc.concat(
 )
 
 ## And make pseudobulks
-scvi_ls_pseudos, scvi_ls_props = make_pseudobulks(
+pseudobulk_dict["scVILS"], _ = make_pseudobulks(
     scvi_ls_adata,
     {"random": num_rand, "realistic": num_realistic},
     num_cells=num_cells,
@@ -353,7 +355,7 @@ scvi_ls_pseudos, scvi_ls_props = make_pseudobulks(
 )
 
 
-scvi_ls_nodeg_pseudos, scvi_ls_nodeg_props = make_pseudobulks(
+pseudobulk_nodeg_dict["scVILS (-DEG)"], _ = make_pseudobulks(
     scvi_ls_nodeg_adata,
     {"random": num_rand, "realistic": num_realistic},
     num_cells=num_cells,
@@ -361,8 +363,7 @@ scvi_ls_nodeg_pseudos, scvi_ls_nodeg_props = make_pseudobulks(
     cell_types=scvi_ls_nodeg_adata.obs.cell_types.unique(),
 )
 
-
-scvi_cond_pseudos, scvi_cond_props = make_pseudobulks(
+pseudobulk_dict["scVIcond"], _ = make_pseudobulks(
     scvi_cond_adata,
     {"random": num_rand, "realistic": num_realistic},
     num_cells=num_cells,
@@ -370,7 +371,7 @@ scvi_cond_pseudos, scvi_cond_props = make_pseudobulks(
     cell_types=scvi_cond_adata.obs.cell_types.unique(),
 )
 
-scvi_cond_nodeg_pseudos, scvi_cond_nodeg_props = make_pseudobulks(
+pseudobulk_nodeg_dict["scVIcond (-DEG)"], _ = make_pseudobulks(
     scvi_cond_nodeg_adata,
     {"random": num_rand, "realistic": num_realistic},
     num_cells=num_cells,
@@ -474,8 +475,9 @@ transformed_sn_pca_1.var_names = sn_missing_nodeg[1].var_names
 trans_nodeg = sc.concat([transformed_sn_pca_1, transformed_sn_pca_0])
 pca_adata_nodeg = sc.concat([sc_adata_nodeg, trans_nodeg])
 
-## and make pseudobulks:
-pca_pseudos, pca_props = make_pseudobulks(
+## And make pseudobulks:
+
+pseudobulk_dict["PCA"], _ = make_pseudobulks(
     pca_adata,
     {"random": num_rand, "realistic": num_realistic},
     num_cells=num_cells,
@@ -483,7 +485,7 @@ pca_pseudos, pca_props = make_pseudobulks(
     cell_types=pca_adata.obs.cell_types.unique(),
 )
 
-pca_nodeg_pseudos, pca_nodeg_props = make_pseudobulks(
+pseudobulk_nodeg_dict["PCA (-DEG)"], _ = make_pseudobulks(
     pca_adata_nodeg,
     {"random": num_rand, "realistic": num_realistic},
     num_cells=num_cells,
@@ -497,7 +499,7 @@ adata_nodeg = sc.concat([sn_missing_nodeg[0], sn_missing_nodeg[1]])
 adata_nodeg = sc.concat([adata_nodeg, sc_adata_nodeg])
 
 ## and make pseudobulks
-nodeg_pseudos, nodeg_props = make_pseudobulks(
+pseudobulk_nodeg_dict["snRNA (-DEG)"], _ = make_pseudobulks(
     adata_nodeg,
     {"random": num_rand, "realistic": num_realistic},
     num_cells=num_cells,
@@ -511,7 +513,7 @@ adata_rawsn = sc.concat([sn_missing[0], sn_missing[1]])
 adata_rawsn = sc.concat([sc_adata, adata_rawsn])
 
 ## and make pseudobulks
-rawsn_pseudos, rawsn_props = make_pseudobulks(
+pseudobulk_dict["snRNA"], _ = make_pseudobulks(
     adata_rawsn,
     {"random": num_rand, "realistic": num_realistic},
     num_cells=num_cells,
@@ -522,7 +524,7 @@ rawsn_pseudos, rawsn_props = make_pseudobulks(
 ## Thecontrol now.
 
 # single cell
-allsc_pseudos, allsc_props = make_pseudobulks(
+pseudobulk_dict["scRNA"], _ = make_pseudobulks(
     sc_adata,
     {"random": num_rand, "realistic": num_realistic},
     num_cells=num_cells,
@@ -531,20 +533,6 @@ allsc_pseudos, allsc_props = make_pseudobulks(
 )
 
 ## Now saving all:
-
-pseudobulk_dict = {
-    "snRNA": pseudobulk_dict["snRNA"],
-    "scVILS": pseudobulk_dict["scVILS"],
-    "scVIcond": pseudobulk_dict["scVIcond"],
-    "PCA": pseudobulk_dict["PCA"],
-}
-
-pseudobulk_nodeg_dict = {
-    "scVILS (-DEG)": pseudobulk_nodeg_dict["scVILS (-DEG)"],
-    "scVIcond (-DEG)": pseudobulk_nodeg_dict["scVIcond (-DEG)"],
-    "PCA (-DEG)": pseudobulk_nodeg_dict["PCA (-DEG)"],
-    "snRNA (-DEG)": pseudobulk_nodeg_dict["snRNA (-DEG)"],
-}
 
 # Make a directory to hold your saved objects
 save_dir = f"{os.getcwd()}/../data/Real_ADP/bulks_for_comp/"
@@ -560,14 +548,16 @@ for name, df in pseudobulk_dict.items():
     df.to_pickle(os.path.join(save_dir, f"{fname}_pseudobulk.pkl"))
 
 # 3)Save “no‐DEG” versions too
+real_df_nodeg = bulk_df[all_de_genes_list]
 real_df_nodeg.to_pickle(os.path.join(save_dir, "bulk_df_nodeg.pkl"))
+
 for name, df in pseudobulk_nodeg_dict.items():
     fname = name.replace(" ", "_").replace("/", "_")
     df.to_pickle(os.path.join(save_dir, f"{fname}_pseudobulk_nodeg.pkl"))
 
-# 4) Later, to load them back in one go:
-with open(os.path.join(save_dir, "bulk_df.pkl"), "rb") as f:
-    bulk_df = pickle.load(f)
+# Later, to load them back in one go:
+# with open(os.path.join(save_dir, "bulk_df.pkl"), "rb") as f:
+#     bulk_df = pickle.load(f)
 
 pseudobulk_dict = {}
 for p in os.listdir(save_dir):
