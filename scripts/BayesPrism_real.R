@@ -64,7 +64,7 @@ cat("Loaded realbulks_data with dim:", dim(realbulks_data), "\n")
 mixture_data <- realbulks_data
 
 # --- 2) Also handle the baseline references (sc_raw_real, sn_raw_real) if they exist ---
-base_refs <- c("sc_raw_real", "sn_raw_real")
+base_refs <- c("sc_raw_real", "sn_raw_real", "ref_real_degIntAllSN")
 
 for (base_ref in base_refs) {
   signal_file <- file.path(import_path, paste0(base_ref, "_signal.csv"))

@@ -25,7 +25,7 @@ conda install -y \
     anndata \
     h5py
 
-# Install additional packages with pip if needed
+# Install additional packages with pip
 pip install --no-cache-dir \
     tqdm \
     umap-learn
@@ -40,4 +40,4 @@ pip list
 # Deactivate the environment
 conda deactivate
 
-echo "Conda environment 'env_deconv' has been created and is ready to use."
+echo "Conda environments 'env_deconv' has been created and is ready to use."

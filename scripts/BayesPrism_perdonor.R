@@ -46,7 +46,8 @@ transformations <- c(
   "scviSN",
   "scvi_LSshift_SN",
   "degScviSN",
-  "degScviLSshift_SN"
+  "degScviLSshift_SN",
+  "degIntAllSN"
 )
 
 # 1) load bulks
