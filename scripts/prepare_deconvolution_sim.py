@@ -109,7 +109,8 @@ if __name__ == "__main__":
     parser.add_argument("--pseudobulks_props", type=str, required=True, help="Pseudobulk proportions in JSON format")
     parser.add_argument("--num_cells", type=int, required=True, help="Number of cells per pseudobulk")
     parser.add_argument("--noise", action="store_true",
-                    help="Add Gaussian noise to pseudobulks")
+    parser.add_argument("--noise", nargs='?', const=True, default=False, type=str2bool,
+                        help="Add Gaussian noise to pseudobulks (can be used as a flag or with True/False)")
     parser.add_argument("--deseq_alpha", type=float, default=0.01, help="Alpha threshold for DEG analysis")
     parser.add_argument("--deconvolution_method", type=str, default="bayesprism", help="Deconvolution method")
 
