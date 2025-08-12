@@ -315,7 +315,7 @@ if __name__ == "__main__":
             variance_threshold=0.75,
             sc_celltype_labels=sc_filtered_for_pca.obs.cell_types.astype(str),
             sn_celltype_labels=sn_filtered_for_pca.obs.cell_types.astype(str),
-            heldout_label = cell_type
+            heldout_label=cell_type
         )
 
         # Convert the DataFrame to an AnnData object.
