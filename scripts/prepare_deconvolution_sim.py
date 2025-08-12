@@ -577,7 +577,7 @@ if __name__ == "__main__":
         _, sn_filtered_i = remove_diff_genes(
             sc_adata=adata_sn_ct, sn_adata=adata_sn_ct, diff_genes=intersect_degs
         )
-    save_bayesprism_references(sn_filtered_i, args.output_path, "degIntAllSN")
+        save_bayesprism_references(sn_filtered_i, args.output_path, "degIntAllSN")
 
     print("Making pseudobulks...")
     # Generate pseudobulks
