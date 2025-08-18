@@ -56,6 +56,7 @@ valid_transforms = {
     "scvi_LSshift_SN",
     "degScviSN",
     "degScviLSshift_SN",
+    "degIntAllSN"
 }
 
 # -------- mutually-exclusive flags --------
@@ -156,7 +157,6 @@ def parse_bp_filename(path: str, mode: str):
         return None, None
 
     return None, None
-
 
 # --------------------------------------------------------------------
 # 5) Build evaluation DataFrame

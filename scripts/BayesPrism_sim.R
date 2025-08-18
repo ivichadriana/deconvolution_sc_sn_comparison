@@ -79,7 +79,7 @@ cat("Loaded mixture_data with dim:", dim(mixture_data), "\n")
 
 # --- 2) Also handle the standard references sc_raw and sn_raw ---
 # We'll do these first, outside the holdout logic because it gets more complicated:
-base_refs <- c("sc_raw", "sn_raw")
+base_refs <- c("sc_raw", "sn_raw", "degIntAllSN")
 
 for (base_ref in base_refs) {
   signal_file <- file.path(import_path, paste0(base_ref, "_signal.csv"))
