@@ -232,7 +232,7 @@ if __name__ == "__main__":
         print("this are the DEGs intersection:", intersect_degs)
         intersect_degs = {"all": pd.DataFrame(index=intersect_degs.values)}
     else:
-        raise FileExistsError(
+        raise FileNotFoundError(
             "intersect_3ds.csv doesn't exist. Run notebook: notebooks/differential_gene_expression.ipynb"
         )
     sc_filtered_i, sn_filtered_i = remove_diff_genes(

@@ -30,7 +30,6 @@ Use this script to benchmark modality-specific biases or to exclude sc/sn
 marker/different genes before downstream deconvolution.
 """
 
-import json
 import scanpy as sc
 import pandas as pd
 import json
@@ -39,21 +38,18 @@ import numpy as np
 import os
 import torch
 import random
-import sys
 import gc
 from scipy.sparse import issparse
 from multiprocessing import Pool
 from sklearn.decomposition import PCA
-import scvi
 from pydeseq2.default_inference import DefaultInference
 from pydeseq2.dds import DeseqDataSet
 from pydeseq2.ds import DeseqStats
-
 import sys
 
 sys.path.insert(1, "../../")
 sys.path.insert(1, "../")
-sys.path.insert(1, "../../../../")
+
 from src.helpers import prepare_data, split_single_cell_data
 from src.helpers import pick_cells, make_references
 from src.helpers import (

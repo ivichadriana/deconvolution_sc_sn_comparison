@@ -199,27 +199,24 @@ model_notcond_allgenes = scvi_train_model(
 adata = sc.concat([sc_adata, sn_adata])
 de_change = {}
 
-
 # -----------------------------
 # DIFFERENTIAL GENE EXPRESSION
 # -----------------------------
-
 print("Check if differential gene expression calcs. are needed...")
 genes_save_path = f"{base_dir}/data/{res_name}/degs.json"
+
 if os.path.exists(genes_save_path):
     try:
         with open(genes_save_path, "r") as file:
             diff_genes_json = json.load(file)
-        # Convert the JSON representation back into DataFrames
+        # Reconstruct DataFrames
         diff_genes = {}
         for key, value in diff_genes_json.items():
-            # Check if this value looks like a DataFrame stored in 'split' orientation
-            if isinstance(value, dict) and {"index", "columns", "data"}.issubset(
-                value.keys()
-            ):
+            if isinstance(value, dict) and {"index","columns","data"}.issubset(value.keys()):
                 diff_genes[key] = pd.DataFrame(**value)
             else:
-                diff_genes[key] = value
+                # Fallback: ensure we have a DataFrame to avoid errors later
+                diff_genes[key] = pd.DataFrame(value)
     except json.JSONDecodeError:
         print("Warning: JSON file is empty or corrupted. Recalculating diff_genes...")
         print("Creating pseudobulk of size 10 for SC and SN data for DGE analysis...")
@@ -229,22 +226,17 @@ if os.path.exists(genes_save_path):
             sn_adata=pseudo_sn_adata,
             sc_adata=pseudo_sc_adata,
             deseq_alpha=0.01,
-            num_threads=4,  # matches SLURM --ntasks
-            n_cpus_per_thread=16,  # matches SLURM --cpus-per-task
+            num_threads=4,
+            n_cpus_per_thread=16,
         )
-        # Write a JSON-serializable copy to disk
         diff_genes_json = {
-            key: (
-                value.to_dict(orient="split")
-                if isinstance(value, pd.DataFrame)
-                else value
-            )
-            for key, value in diff_genes.items()
+            key: (df.to_dict(orient="split") if isinstance(df, pd.DataFrame) else df)
+            for key, df in diff_genes.items()
         }
+        # persist the repaired/recomputed data
         with open(genes_save_path, "w") as file:
             json.dump(diff_genes_json, file)
 else:
-    # Calculate differentially expressed genes
     print("Not found previous diff. gene expr... calculating now!")
     print("Creating pseudobulk of size 10 for SC and SN data for DGE analysis...")
     pseudo_sc_adata = create_fixed_pseudobulk(sc_adata, group_size=10)
@@ -253,21 +245,19 @@ else:
         sn_adata=pseudo_sn_adata,
         sc_adata=pseudo_sc_adata,
         deseq_alpha=0.01,
-        num_threads=4,  # matches SLURM --ntasks
-        n_cpus_per_thread=16,  # matches SLURM --cpus-per-task
+        num_threads=4,
+        n_cpus_per_thread=16,
     )
     print("Found these many differentially expressed genes:")
     for key in diff_genes.keys():
-        print(key)
-        print(diff_genes[key].shape)
+        print(key, diff_genes[key].shape)
 
-    # Create a JSON-serializable copy for dumping, but keep diff_genes as DataFrames
     diff_genes_json = {
-        key: value.to_dict(orient="split") if isinstance(value, pd.DataFrame) else value
-        for key, value in diff_genes.items()
+        key: (df.to_dict(orient="split") if isinstance(df, pd.DataFrame) else df)
+        for key, df in diff_genes.items()
     }
-with open(genes_save_path, "w") as file:
-    json.dump(diff_genes_json, file)
+    with open(genes_save_path, "w") as file:
+        json.dump(diff_genes_json, file)
 
 flattened_index = [idx for df in diff_genes.values() for idx in df.index]
 flattened_index = list(flattened_index)

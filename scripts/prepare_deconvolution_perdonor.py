@@ -32,6 +32,7 @@ import numpy as np
 import scanpy as sc
 import pandas as pd
 import scvi
+import torch
 from sklearn.decomposition import PCA
 
 sys.path.insert(1, "../../")
@@ -78,13 +79,10 @@ from src.transforms import (
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
-st = 1
-if torch := __import__("torch"):  # set torch seed if available
-    torch.manual_seed(SEED)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
 os.environ["PYTHONHASHSEED"] = str(SEED)
-
 
 def main():
     import argparse
@@ -224,7 +222,7 @@ def main():
             print("this are the DEGs intersection:", intersect_degs)
             intersect_degs = {"all": pd.DataFrame(index=intersect_degs.values)}
         else:
-            raise FileExistsError(
+            raise FileNotFoundError(
                 "intersect_3ds.csv doesn't exist. Run notebook: notebooks/differential_gene_expression.ipynb"
             )
         sc_filtered_i, sn_filtered_i = remove_diff_genes(
