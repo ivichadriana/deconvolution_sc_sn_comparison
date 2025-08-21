@@ -20,7 +20,9 @@ The aim of this research project is to evaluate methods of transformation that c
     - [4_process_results_sim.sh](scripts/4_process_results_sim.sh)
         - Runs [script to process the results from deconvolution](scripts/process_results.py) (only of simulation), computes RMSE and Pearson, and puts it in a format for analysis.
     - [5_results_notebook_sim.sh](scripts/5_results_notebook_sim.sh)
-        - Runs [notebook to visualize the results from the simulations deconvolution](notebook/results_sim.ipynb). Includes plots from paper's figures.
+        - Runs [notebook to visualize the results from the deconvolution simulations](notebooks/results_sim.ipynb). Includes plots from paper's figures.
+    - [6_comparison_with_sc_and_bulks.sh](/scripts/6_comparison_with_sc_and_bulks.sh)
+        - Runs [script to process bulks and train the appropriate deep learning models](/scripts/process_bulks_train_models.py) and [script to prepare the pseudobulks for clustering with real bulks.](/scripts/prepare_real_bulk_clustering.py"), along with the 2 result notebooks. Results can be seen in [results_sc_comparison.ipynb](notebooks/results_sc_comparison.ipynb) and [results_bulks_comparison.ipynb](notebooks/results_bulks_comparison.ipynb).
 
 - You can look at the results in the results notebooks after! All plots included in all figures of the paper will be available in these.
 
