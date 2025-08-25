@@ -34,13 +34,10 @@ Key steps
 
 import scanpy as sc
 import pandas as pd
-import json
 import numpy as np
 import os
 import torch
 import random
-from sklearn.neighbors import NearestNeighbors
-import gc
 from scipy.sparse import issparse
 from multiprocessing import Pool
 from sklearn.decomposition import PCA
@@ -56,55 +53,46 @@ sys.path.insert(1, "../")
 sys.path.insert(1, "../../../../")
 
 from src.helpers import (
-    prepare_data,
-    split_single_cell_data,
-    pick_cells,
-    open_adipose_datasets_all,
-)
-from src.helpers import (
-    downsample_cells_by_type,
-    make_references,
-    save_bayesprism_references,
-    save_bayesprism_realbulks,
-)
-from src.helpers import (
     make_pseudobulks,
     save_bayesprism_pseudobulks,
     save_cibersort,
     scvi_train_model,
+    set_all_seeds,
+    concat_and_save,
+    get_donor_views,
+    downsample_cells_by_type,
+    make_references,
+    save_bayesprism_references,
+    prepare_data,
+    split_single_cell_data,
+    pick_cells,
+    open_adipose_datasets_all,
+    save_bayesprism_realbulks,
 )
+
 from src.deg_funct import (
     create_fixed_pseudobulk,
     load_others_degs,
     run_deseq2_for_cell_type,
     load_or_calc_degs,
-)
-from src.deg_funct import (
     differential_expression_analysis,
     remove_diff_genes,
     differential_expression_analysis_parallel,
 )
+
 from src.transforms import (
     transform_heldout_sn_to_mean_sc_VAE,
     transform_heldout_sn_to_mean_sc_local,
-)
-from src.transforms import (
+    load_intersect_degs_or_fail,
+    build_deg_pca_sn_ref,
+    build_pca_sn_ref,
     transform_heldout_sn_to_mean_sc,
     calculate_median_library_size,
     get_normalized_expression_from_latent,
 )
 
 SEED = 42
-# Set Python built-in random seed
-random.seed(SEED)
-# Set NumPy random seed
-np.random.seed(SEED)
-# Set PyTorch random seeds for CPU and GPU
-torch.manual_seed(SEED)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(SEED)
-# Ensure reproducibility in hash-based operations
-os.environ["PYTHONHASHSEED"] = str(SEED)
+set_all_seeds(SEED)
 
 if __name__ == "__main__":
     import argparse
@@ -147,7 +135,7 @@ if __name__ == "__main__":
     # 1) Load data
     print("Preparing data...")
     bulk_df, adata_sc, adata_sn, sn_missing = open_adipose_datasets_all(
-        res_name="Real_ADP", base_dir=base_dir
+        res_name=args.res_name, base_dir=base_dir
     )
     sn_missing = sc.concat([sn_missing[0], sn_missing[1]])
     full_sn = sc.concat([adata_sn, sn_missing])
@@ -177,29 +165,16 @@ if __name__ == "__main__":
 
     ### 1) Raw SN added to SC ####
     ##############################
-    sc_plus_sn_raw = sc.concat([adata_sc, sn_missing], axis=0, merge="same")
-    save_bayesprism_references(sc_plus_sn_raw, args.output_path, f"ref_real_rawSN")
+    concat_and_save(
+        adatas=[adata_sc, sn_missing],
+        output_path=args.output_path,
+        name=f"ref_real_rawSN",
+    )
 
     ### 2) PCA-transformed SN ####
     ##############################
 
-    df_transformed_sn_ct = transform_heldout_sn_to_mean_sc_local(
-        sc_data=adata_sc.to_df(),
-        sn_data=adata_sn.to_df(),
-        sn_heldout_data=sn_missing.to_df(),
-        variance_threshold=0.75,
-        sc_celltype_labels=adata_sc.obs["cell_types"].astype(str),
-        sn_celltype_labels=adata_sn.obs["cell_types"].astype(str),
-    )
-
-    # Convert the DataFrame to an AnnData object. This is the PCA SN transformed.
-    adata_sn_transformed = sc.AnnData(X=df_transformed_sn_ct.values)
-    adata_sn_transformed.var_names = df_transformed_sn_ct.columns
-    adata_sn_transformed.obs = sn_missing.obs.copy()
-
-    # Concatenate both with SC
-    sc_plus_sn_pca = sc.concat([adata_sc, adata_sn_transformed], axis=0, merge="same")
-    save_bayesprism_references(sc_plus_sn_pca, args.output_path, f"ref_real_pcaSN")
+    build_pca_sn_ref(adata_sc, adata_sn, sn_missing, args.output_path, donor="real")
 
     ### 3) DEG-Filtered SN (this dataset's) ####
     ###########################
@@ -207,45 +182,39 @@ if __name__ == "__main__":
     sc_filtered, sn_filtered = remove_diff_genes(
         sc_adata=adata_sc, sn_adata=sn_missing, diff_genes=diff_genes
     )
-    # Combine
-    sc_plus_sn_deg = sc.concat([sc_filtered, sn_filtered], axis=0, merge="same")
-    save_bayesprism_references(sc_plus_sn_deg, args.output_path, f"ref_real_degSN")
+    # Combine and save
+    concat_and_save(
+        adatas=[sc_filtered, sn_filtered],
+        output_path=args.output_path,
+        name=f"ref_real_degSN",
+    )
 
     ### 3.1) DEG-Filtered SN (other dataset's) ####
     ###########################
     sc_filtered_o, sn_filtered_o = remove_diff_genes(
         sc_adata=adata_sc, sn_adata=sn_missing, diff_genes=others_degs
     )
-    # Combine
-    sc_plus_sn_deg_o = sc.concat([sc_filtered_o, sn_filtered_o], axis=0, merge="same")
-    save_bayesprism_references(
-        sc_plus_sn_deg_o, args.output_path, f"ref_real_degOtherSN"
+    # Combine and save
+    concat_and_save(
+        adatas=[sc_filtered_o, sn_filtered_o],
+        output_path=args.output_path,
+        name=f"ref_real_degOtherSN",
     )
 
     ### 3.2) DEG-Filtered SN (intersect of 3 datsets) ####
     ###########################
 
-    if os.path.exists(os.path.join(os.getcwd(), "../data/intersect_3ds.csv")):
-        intersect_degs = pd.read_csv(
-            os.path.join(os.getcwd(), "../data/intersect_3ds.csv"), index_col=0
-        )
-        print("this are the DEGs intersection:", intersect_degs)
-        intersect_degs = {"all": pd.DataFrame(index=intersect_degs.values)}
-    else:
-        raise FileNotFoundError(
-            "intersect_3ds.csv doesn't exist. Run notebook: notebooks/differential_gene_expression.ipynb"
-        )
+    intersect_degs = load_intersect_degs_or_fail()
+
     sc_filtered_i, sn_filtered_i = remove_diff_genes(
         sc_adata=adata_sc, sn_adata=sn_missing, diff_genes=intersect_degs
     )
-    # Combine
-    print("Intersection gene filtering:")
-    print("shape of sc anndata before filtering: ", adata_sc.shape)
-    print("shape of sn anndata before filtering: ", sn_missing.shape)
-
-    sc_plus_sn_deg_i = sc.concat([sc_filtered_i, sn_filtered_i], axis=0, merge="same")
-    print("shape of combo anndata AFTER filtering: ", sc_plus_sn_deg_i.shape)
-    save_bayesprism_references(sc_plus_sn_deg_i, args.output_path, f"ref_real_degIntSN")
+    # Combine and save
+    concat_and_save(
+        adatas=[sc_filtered_i, sn_filtered_i],
+        output_path=args.output_path,
+        name=f"ref_real_degIntSN",
+    )
 
     ### And Random genes equal to this datasets DEGS ####
     ###########################
@@ -267,48 +236,22 @@ if __name__ == "__main__":
     sc_filtered_r, sn_filtered_r = remove_diff_genes(
         sc_adata=adata_sc, sn_adata=sn_missing, diff_genes=random_dict
     )
-    # Combine
-    print("Random gene filtering:")
-    print("shape of sc anndata before filtering: ", adata_sc.shape)
-    print("shape of sn anndata before filtering: ", sn_missing.shape)
-
-    sc_plus_sn_deg_r = sc.concat([sc_filtered_r, sn_filtered_r], axis=0, merge="same")
-    print("shape of combo anndata AFTER filtering: ", sc_plus_sn_deg_r.shape)
-
-    save_bayesprism_references(
-        sc_plus_sn_deg_r, args.output_path, f"ref_real_degRandSN"
+    # Combine and save
+    concat_and_save(
+        adatas=[sc_filtered_r, sn_filtered_r],
+        output_path=args.output_path,
+        name=f"ref_real_degRandSN",
     )
 
     ### 4) DEG-Filtered + PCA ####
-
-    sc_filtered_for_pca, sn_missing_filtered_for_pca = remove_diff_genes(
-        sc_adata=adata_sc, sn_adata=sn_missing, diff_genes=diff_genes
+    build_deg_pca_sn_ref(
+        adata_sc=adata_sc,
+        adata_sn=adata_sn,
+        sn_missing=sn_missing,
+        diff_genes=diff_genes,
+        output_path=args.output_path,
+        donor="real",
     )
-    _, sn_filtered_for_pca = remove_diff_genes(
-        sc_adata=adata_sc, sn_adata=adata_sn, diff_genes=diff_genes
-    )
-    df_deg_transformed_sn_ct = transform_heldout_sn_to_mean_sc_local(
-        sc_data=sc_filtered_for_pca.to_df(),
-        sn_data=sn_filtered_for_pca.to_df(),
-        sn_heldout_data=sn_missing_filtered_for_pca.to_df(),
-        variance_threshold=0.75,
-        sc_celltype_labels=adata_sc.obs["cell_types"].astype(str),
-        sn_celltype_labels=adata_sn.obs["cell_types"].astype(str),
-    )
-
-    # Convert the DataFrame to an AnnData object. This is the PCA SN transformed.
-    adata_deg_sn_transformed = sc.AnnData(X=df_deg_transformed_sn_ct.values)
-    adata_deg_sn_transformed.var_names = df_deg_transformed_sn_ct.columns
-    adata_deg_sn_transformed.obs = sn_missing.obs.copy()
-
-    # Concatenate both with SC
-    sc_deg_plus_sn_pca = sc.concat(
-        [sc_filtered_for_pca, adata_deg_sn_transformed], axis=0, merge="same"
-    )
-    save_bayesprism_references(
-        sc_deg_plus_sn_pca, args.output_path, f"ref_real_degPCA_SN"
-    )
-
     ### 5) VAE Transform (conditional) ####
     # scVI setup
     # For the conditional model
@@ -357,13 +300,13 @@ if __name__ == "__main__":
     adata_sn_transformed_scvi.var_names = sn_missing.var_names
     adata_sn_transformed_scvi.obs = sn_missing.obs.copy()
 
-    # Merge with SC minus the held-out cell -> final reference
-    sc_plus_sn_scvi = sc.concat(
-        [adata_sc, adata_sn_transformed_scvi], axis=0, merge="same"
+    # Merge with SC minus the held-out cell -> final reference and trained model.
+    concat_and_save(
+        adatas=[adata_sc, adata_sn_transformed_scvi],
+        output_path=args.output_path,
+        name=f"ref_real_scviSN",
     )
-    # Save for deconvolution, reference and trained model.
     model.save(f"{args.output_path}/scvi_trained_model_real", overwrite=True)
-    save_bayesprism_references(sc_plus_sn_scvi, args.output_path, f"ref_real_scviSN")
 
     ### Latent space VAE Transform (not conditional) ####
     ## 6: VAE latent space arithmetic transform :
@@ -420,16 +363,13 @@ if __name__ == "__main__":
     adata_sn_transformed_scvi_notcond.var_names = sn_missing.var_names
     adata_sn_transformed_scvi_notcond.obs = sn_missing.obs.copy()
 
-    # Merge with SC minus the held-out cell -> final reference
-    sc_plus_sn_scvi = sc.concat(
-        [adata_sc, adata_sn_transformed_scvi_notcond], axis=0, merge="same"
+    # Merge with SC minus the held-out cell -> final reference and trained model.
+    concat_and_save(
+        adatas=[adata_sc, adata_sn_transformed_scvi_notcond],
+        output_path=args.output_path,
+        name=f"ref_real_scvi_LSshift_SN",
     )
-
-    # Save for deconvolution, reference and trained model.
     model.save(f"{args.output_path}/scvi_notcond_trained_model_real", overwrite=True)
-    save_bayesprism_references(
-        sc_plus_sn_scvi, args.output_path, f"ref_real_scvi_LSshift_SN"
-    )
 
     ############################################################################
     ### (G) (-)DEG + SCVI transform (conditional) => ref_degScviSN
@@ -486,14 +426,11 @@ if __name__ == "__main__":
     adata_sn_deg_cond_transform.var_names = sn_missing_filtered_scvi.var_names
     adata_sn_deg_cond_transform.obs = sn_missing_filtered_scvi.obs.copy()
 
-    # 7) Concatenate with the SC (DEG-filtered)
-    sc_plus_sn_deg_cond_scvi = sc.concat(
-        [sc_filtered_scvi, adata_sn_deg_cond_transform], axis=0, merge="same"
-    )
-
-    # 8) Save the reference
-    save_bayesprism_references(
-        sc_plus_sn_deg_cond_scvi, args.output_path, f"ref_real_degScviSN"
+    # 7) Concatenate with the SC (DEG-filtered), Save the reference, and Trained Model
+    concat_and_save(
+        adatas=[sc_filtered_scvi, adata_sn_deg_cond_transform],
+        output_path=args.output_path,
+        name=f"ref_real_degScviSN",
     )
     model_deg_cond.save(deg_cond_model_path, overwrite=True)
 
@@ -519,7 +456,7 @@ if __name__ == "__main__":
     else:
         # Training
         model_deg_notcond = scvi.model.SCVI(
-            adata_train_deg_scvi, n_layers=2, n_latent=30, gene_likelihood="nb"
+            adata_train_deg_notcond, n_layers=2, n_latent=30, gene_likelihood="nb"
         )
         model_deg_notcond.view_anndata_setup()
         model_deg_notcond.train(early_stopping=True, early_stopping_patience=10)
@@ -538,25 +475,18 @@ if __name__ == "__main__":
     adata_sn_deg_notcond_LS.var_names = sn_missing_filtered_scvi.var_names
     adata_sn_deg_notcond_LS.obs = sn_missing_filtered_scvi.obs.copy()
 
-    # 5) Concatenate with SC (DEG-filtered)
-    sc_plus_sn_deg_notcond_LS = sc.concat(
-        [sc_filtered_scvi, adata_sn_deg_notcond_LS], axis=0, merge="same"
-    )
-
-    # 6) Save the reference
-    save_bayesprism_references(
-        sc_plus_sn_deg_notcond_LS, args.output_path, f"ref_real_degScviLSshift_SN"
+    # 5) Concatenate with SC (DEG-filtered) and Save the reference
+    concat_and_save(
+        adatas=[sc_filtered_scvi, adata_sn_deg_notcond_LS],
+        output_path=args.output_path,
+        name=f"ref_real_degScviLSshift_SN",
     )
     model_deg_notcond.save(deg_notcond_model_path, overwrite=True)
 
     ### DEG-Filtered SN (intersect of 3 datsets) all cells are SN ####
     ###########################
 
-    intersect_degs = pd.read_csv(
-        os.path.join(os.getcwd(), "../data/intersect_3ds.csv"), index_col=0
-    )
-    print("this are the DEGs intersection:", intersect_degs)
-    intersect_degs = {"all": pd.DataFrame(index=intersect_degs.values)}
+    intersect_degs = load_intersect_degs_or_fail()
 
     _, full_sn_3d = remove_diff_genes(
         sc_adata=full_sn, sn_adata=full_sn, diff_genes=intersect_degs
