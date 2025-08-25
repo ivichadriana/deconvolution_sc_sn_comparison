@@ -52,6 +52,20 @@ from src.helpers import (
     save_bayesprism_pseudobulks,
 )
 
+# Function to parse the attributes field of the GTF file
+def parse_attributes(attr_string):
+    attributes = {}
+    for attribute in attr_string.split(";"):
+        attribute = attribute.strip()
+        if not attribute:
+            continue
+        key_value = attribute.split(" ", 1)
+        if len(key_value) == 2:
+            key, value = key_value
+            # Remove quotes from the value
+            attributes[key] = value.replace('"', "")
+    return attributes
+
 # -----------------------------
 # PARAMETERS
 # -----------------------------
@@ -82,22 +96,6 @@ gtf_df = pd.read_csv(gtf_path, sep="\t", comment="#", header=None)
 
 # Filter for gene-level entries (feature column equals "gene")
 gene_df = gtf_df[gtf_df[2] == "gene"].copy()
-
-
-# Function to parse the attributes field of the GTF file
-def parse_attributes(attr_string):
-    attributes = {}
-    for attribute in attr_string.split(";"):
-        attribute = attribute.strip()
-        if not attribute:
-            continue
-        key_value = attribute.split(" ", 1)
-        if len(key_value) == 2:
-            key, value = key_value
-            # Remove quotes from the value
-            attributes[key] = value.replace('"', "")
-    return attributes
-
 
 # Extract gene_id and gene_name from the attributes column (column 8)
 gene_df["gene_id"] = gene_df[8].apply(lambda x: parse_attributes(x)["gene_id"])
