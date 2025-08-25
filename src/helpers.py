@@ -56,6 +56,39 @@ sys.path.insert(1, '../../')
 sys.path.insert(1, '../')
 sys.path.insert(1, '../../../')
 
+def get_donor_views(adata_adipo_all, adata_sn_all, adata_neut, donor, seed=None):
+    """
+    Returns:
+      adata_adipo (sampled to 95),
+      adata_sn (this donor),
+      sn_missing (pooled neutrophils + sampled adipocytes)
+    Behavior is identical to the original inline code.
+    """
+    if seed is None:
+        seed = 42
+    adata_adipo = adata_adipo_all[adata_adipo_all.obs["batch"] == donor].copy()
+    n_avail = adata_adipo.n_obs
+    if n_avail < 95:
+        raise ValueError(f"Not enough adipocytes in donor {donor}: {n_avail}")
+    sc.pp.subsample(adata_adipo, n_obs=95, random_state=seed)
+
+    adata_sn = adata_sn_all[adata_sn_all.obs["batch"] == donor].copy()
+
+    # IMPORTANT: use the single pre-made 'adata_neut' (already a copy), don't re-copy per donor
+    sn_missing = sc.concat([adata_neut, adata_adipo], axis=0, merge="same")
+    return adata_adipo, adata_sn, sn_missing
+
+def concat_and_save(adatas, output_path, name):
+    # Merge and save reference anndatas
+    ref = sc.concat(adatas, axis=0, merge="same")
+    save_bayesprism_references(ref, output_path, name)
+
+def set_all_seeds(seed: int = 42):
+    import os, random, numpy as np, torch
+    random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
+    if torch.cuda.is_available(): torch.cuda.manual_seed_all(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+
 def compute_metrics(y_true, y_pred):
     """
     Compute RMSE and Pearson correlation (or NaN if fewer than 2 points).
