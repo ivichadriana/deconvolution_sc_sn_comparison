@@ -54,6 +54,47 @@ sys.path.insert(1, "../../")
 sys.path.insert(1, "../")
 sys.path.insert(1, "../../../")
 
+def load_intersect_degs_or_fail():
+    path = os.path.join(os.getcwd(), "../data/intersect_3ds.csv")
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            "intersect_3ds.csv doesn't exist. Run notebook: notebooks/differential_gene_expression.ipynb"
+        )
+    df = pd.read_csv(path, index_col=0)
+    print("this are the DEGs intersection:", df)
+    return {"all": pd.DataFrame(index=df.values)}
+
+def build_pca_sn_ref(adata_sc, adata_sn, sn_missing, output_path, donor):
+    df = transform_heldout_sn_to_mean_sc_local(
+        sc_data=adata_sc.to_df(),
+        sn_data=adata_sn.to_df(),
+        sn_heldout_data=sn_missing.to_df(),
+        variance_threshold=0.75,
+        sc_celltype_labels=adata_sc.obs["cell_types"].astype(str),
+        sn_celltype_labels=adata_sn.obs["cell_types"].astype(str),
+    )
+    adata_sn_tx = sc.AnnData(X=df.values)
+    adata_sn_tx.var_names = df.columns
+    adata_sn_tx.obs = sn_missing.obs.copy()
+    concat_and_save([adata_sc, adata_sn_tx], output_path, f"ref_{donor}_pcaSN")
+
+def build_deg_pca_sn_ref(
+    adata_sc, adata_sn, sn_missing, diff_genes, output_path, donor
+):
+    sc_f, sn_missing_f = remove_diff_genes(adata_sc, sn_missing, diff_genes)
+    _, sn_f = remove_diff_genes(adata_sc, adata_sn, diff_genes)
+    df = transform_heldout_sn_to_mean_sc_local(
+        sc_data=sc_f.to_df(),
+        sn_data=sn_f.to_df(),
+        sn_heldout_data=sn_missing_f.to_df(),
+        variance_threshold=0.75,
+        sc_celltype_labels=adata_sc.obs["cell_types"].astype(str),
+        sn_celltype_labels=adata_sn.obs["cell_types"].astype(str),
+    )
+    adata_tx = sc.AnnData(X=df.values)
+    adata_tx.var_names = df.columns
+    adata_tx.obs = sn_missing.obs.copy()
+    concat_and_save([sc_f, adata_tx], output_path, f"ref_{donor}_degPCA_SN")
 
 def transform_heldout_sn_to_mean_sc_VAE(
     model: scvi.model.SCVI,
