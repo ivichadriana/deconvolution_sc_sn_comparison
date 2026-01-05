@@ -52,6 +52,7 @@ from src.helpers import (
     save_bayesprism_pseudobulks,
 )
 
+
 # Function to parse the attributes field of the GTF file
 def parse_attributes(attr_string):
     attributes = {}
@@ -65,6 +66,7 @@ def parse_attributes(attr_string):
             # Remove quotes from the value
             attributes[key] = value.replace('"', "")
     return attributes
+
 
 # -----------------------------
 # PARAMETERS
@@ -210,7 +212,9 @@ if os.path.exists(genes_save_path):
         # Reconstruct DataFrames
         diff_genes = {}
         for key, value in diff_genes_json.items():
-            if isinstance(value, dict) and {"index","columns","data"}.issubset(value.keys()):
+            if isinstance(value, dict) and {"index", "columns", "data"}.issubset(
+                value.keys()
+            ):
                 diff_genes[key] = pd.DataFrame(**value)
             else:
                 # Fallback: ensure we have a DataFrame to avoid errors later

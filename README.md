@@ -1,56 +1,161 @@
-# **Deconvolution using single-cell RNA sequencing dataset combined with a single-nucleus cell type.**
+# Deconvolution using single-cell and single-nucleus RNA-seq
 
-The aim of this research project is to evaluate methods of transformation that can be applied to single-nucleus RNA sequencing dataset in order to improve deconvolution of bulk RNA-seq. Single-cell RNA-seq and bulk RNA-seq share similar expression (cytoplasmic and nuclear RNA), while single-nucleus RNA-seq only contains nuclear RNA. Our central hypothesis is that differences makes single-nucleus RNA-seq a poor deconvolution reference. We compare the two modalities in both simulations and real data, and we present some transformation options. 
+This project evaluates transformation strategies for using **single-nucleus RNA-seq (snRNA-seq)** as a reference for **bulk RNA-seq deconvolution**, compared to **single-cell RNA-seq (scRNA-seq)**.
 
-# **Reproducing the results**
+Because snRNA-seq captures primarily nuclear RNA, it differs systematically from scRNA-seq, which contains both nuclear and cytoplasmic RNA. We test whether these differences degrade deconvolution performance and whether specific transformations can mitigate them. Comparisons are performed using both **simulated** and **real bulk** datasets.
 
-- Fork or branch and clone the repository. [Github has many tutorials on this](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
-- Run the [bash script to create the conda environments](/environments/create_env.sh) needed.
-    This creates the conda environments from the [environments folder](/environments/) using the yml files (two environments, one for R (env_deconv_r) and one for Python (env_deconv)). 
-- Download the data we use, putting in the appropiate folder (data/ID). All data is publicly available and easily downloadable. All links and details can be found on the Excel sheet [here](data/details/Data_Details.xlsx).
--  After downloading the data, run the shell scripts, in order:
-    - [0_preprocess_data.sh](scripts/0_preprocess_data.sh)
-        - Runs [preprocessing notebooks](notebooks/). Preprocessing and QC for all datasets. 
-    - [1_train_scvi_models_sim.sh](scripts/1_train_scvi_models_sim.sh) 
-        - Runs [training scripts](scripts/train_scvi_models_allgenes.py) Trains scVI models (conditional and not conditional), with and without groups of differentially expressed genes.
-    - [2_prepare_deconvolution_sim.sh](scripts/2_prepare_deconvolution_sim.sh) 
-        - Runs [script to prepare files for deconvolution](scripts/prepare_deconvolution_sim.py) (only simulations). Files needed are one reference for each transform, where we transform one cell type at a time. 
-    - [3_run_bayesprism](scripts/3_run_bayesprism_sim.sh)
-        - Runs [script for deconvolution](scripts/BayesPrism_sim.R) through BayesPrism/InstaPrism using the references and pseudobulks created on 2.Tutorials on InstaPrism available [here](https://github.com/humengying0907/InstaPrismSourceCode).
-    - [4_process_results_sim.sh](scripts/4_process_results_sim.sh)
-        - Runs [script to process the results from deconvolution](scripts/process_results.py) (only of simulation), computes RMSE and Pearson, and puts it in a format for analysis.
-    - [5_results_notebook_sim.sh](scripts/5_results_notebook_sim.sh)
-        - Runs [notebook to visualize the results from the deconvolution simulations](notebooks/results_sim.ipynb). Includes plots from paper's figures.
-    - [6_comparison_with_sc_and_bulks.sh](/scripts/6_comparison_with_sc_and_bulks.sh)
-        - Runs [script to process bulks and train the appropriate deep learning models](/scripts/process_bulks_train_models.py) and [script to prepare the pseudobulks for clustering with real bulks.](/scripts/prepare_real_bulk_clustering.py"), along with the 2 result notebooks. Results can be seen in [results_sc_comparison.ipynb](notebooks/results_sc_comparison.ipynb) and [results_bulks_comparison.ipynb](notebooks/results_bulks_comparison.ipynb).
+## Reproducing the results
 
-- You can look at the results in the results notebooks after! All plots included in all figures of the paper will be available in these.
+### 1. Clone the repository
 
-Example on running bash on HPC: 
-> sbatch scripts/0_preprocess_data.sh
+```bash
+git clone https://github.com/greenelab/deconvolution_sc_sn_comparison.git
+cd deconvolution_sc_sn_comparison
+```
 
-# Contribute to the research!
+### 2. Create the conda environments
 
-## **Instructions for adding your own method to the analysis:**
-- Preprocess data [as usual](scripts/0_preprocess_data.sh) (if you want to add more data, see instructions below). 
-- If your method requieres training, you can add the training code to the [same script where we train scVI models](scripts/train_scvi_models_allgenes.py). You can also train independently.
-- You can now create references for deconvolution with your method:
-    - Add your transformation to the same datasets as seen in the [simulations script](scripts/prepare_deconvolution_sim.py) See where we highlight "Add your transformation here!" line 698.
+Create the required Python and R environments:
 
-- Each of the notebooks have a "Settings" cell at the top. Add your reference identifier to these variables, add a color in the palette, and add a name for it for the plots. You might need to adjust size if the plots don't look right depending on the number of transforms you add.
- 
-## **Instructions for adding more data to the analysis:**
-- Start by preprocessing single cell and single nucleus datasets. You can add our own Jupyter notebook to the [notebooks folder](notebooks). Then, run the [preprocessing shell](scripts/0_preprocess_data.sh). Choose a new identifier for your dataset, add it to the data folder: data/YOURS.
-- After, it's just a matter of adding your new dataset identifier to the shell scripts:
+```bash
+bash environments/create_envs.sh
+```
 
-Example:
-> datasets=("ADP" "PBMC" "MBC" "MSB") to datasets=("ADP" "PBMC" "MBC" "MSB" "YOURS")
+This creates:
+- `env_deconv` (Python)
+- `env_deconv_R` (R / Bioconductor)
 
-- If you only want to add data to the "real bulk" analysis, add it to the shell scripts that contain "Real_ADP", and add a array to the job at the top (we only use one real bulk dataset):
+### 3. Download the data
 
-Example:
-> dataset=("Real_ADP") to dataset=("Real_ADP" "YOURS)
+Download all datasets into the `data/` directory using the appropriate dataset identifiers:
 
-## **Data Access and Processing**
+```
+data/
+ └── DATASET_ID/
+```
 
-Please download the Excel sheet: [data/details/Data_Details.xlsx](Data_Details.xlsx). This contains all links, names, filtering steps, and detials ona ll datasets used.
+All datasets are publicly available. Links, preprocessing steps, and metadata are provided in:
+
+```
+data/details/Data_Details.xlsx
+```
+
+### 4. Run the analysis pipeline
+
+Run the following scripts **in order** (typically using `sbatch` on an HPC system).
+
+#### Data preprocessing
+
+```bash
+scripts/0_preprocess_data.sh
+```
+
+Runs preprocessing and QC notebooks for all datasets.
+
+#### Simulation pipeline
+
+```bash
+scripts/1_train_scvi_models_sim.sh
+```
+
+Trains scVI models (conditional and non-conditional; with and without DE genes).
+
+```bash
+scripts/2_prepare_deconvolution_sim.sh
+```
+
+Prepares transformed references and pseudobulks for simulations.
+
+```bash
+scripts/3_run_bayesprism_sim.sh
+```
+
+Runs BayesPrism / InstaPrism deconvolution.
+
+```bash
+scripts/4_process_results_sim.sh
+```
+
+Processes simulation results and computes RMSE and Pearson correlation.
+
+```bash
+scripts/5_results_notebook_sim.sh
+```
+
+Generates notebooks and figures for simulation results.
+
+#### Real bulk comparison
+
+```bash
+scripts/6_comparison_with_sc_and_bulks.sh
+```
+
+Trains models on real bulks and generates comparison notebooks.
+
+### 5. Inspect results
+
+All figures used in the manuscript are generated in the result notebooks located in:
+
+```
+notebooks/
+```
+
+## Adding your own method
+
+### Adding a new transformation
+
+1. Preprocess data using:
+
+```bash
+scripts/0_preprocess_data.sh
+```
+
+2. If training is required, add your code to:
+
+```
+scripts/train_scvi_models_allgenes.py
+```
+
+3. Add your transformation to:
+
+```
+scripts/prepare_deconvolution_sim.py
+```
+
+(see the section marked “Add your transformation here”).
+
+### Adding new datasets
+
+1. Add a preprocessing notebook to:
+
+```
+notebooks/
+```
+
+2. Add the dataset under:
+
+```
+data/YOUR_DATASET_ID/
+```
+
+3. Register the new dataset ID in the relevant shell scripts, for example:
+
+```bash
+datasets=("ADP" "PBMC" "MBC" "MSB")
+```
+
+Change to:
+
+```bash
+datasets=("ADP" "PBMC" "MBC" "MSB" "YOUR_DATASET_ID")
+```
+
+4. For real bulk analyses, add the dataset ID to scripts that include `Real_ADP`.
+
+## Data access and processing
+
+Detailed information on all datasets used in this study — including download links, filtering steps, and preprocessing details — is available in:
+
+```
+data/details/Data_Details.xlsx
+```

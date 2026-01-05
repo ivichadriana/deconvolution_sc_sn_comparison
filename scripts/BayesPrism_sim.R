@@ -5,9 +5,7 @@
 # by the "prepare_deconvolution.py" script.
 #
 # Usage:
-#   Rscript BayesPrism.R <DATA_TYPE>
-#
-# We parallelize the InstaPrism function with n.cores in the slurm.
+#   Rscript BayesPrism_sim.R <DATA_TYPE>
 # ============================================================
 
 # --------------------------------------------------------------------
@@ -38,20 +36,9 @@ transformations_human <- c(
   "degScviLSshift_SN"
 )
 
-# Avoid interactive repository prompts
-options(repos = c(CRAN = "https://cloud.r-project.org"))
-
-# If needed: install scran or other packages
-if (!requireNamespace("scran", quietly = TRUE)) {
-  BiocManager::install("scran")
-}
-if (!requireNamespace("SingleCellExperiment", quietly = TRUE)) {
-  BiocManager::install("SingleCellExperiment")
-}
-
 library(scran)
 library(BayesPrism)
-library(InstaPrism) # from dev or local install
+library(InstaPrism) 
 library(SingleCellExperiment)
 
 # --- Parse arguments ---
@@ -62,7 +49,7 @@ if (length(args) == 0) {
 data_type <- args[1]
 
 # --- Set up directories ---
-script_dir <- getwd() # use logic to detect directory.
+script_dir <- file.path(getwd(), "scripts")
 import_path <- file.path(script_dir, "..", "data/deconvolution", data_type)
 export_path <- file.path(script_dir, "..", "results", data_type)
 cat("Import path:", import_path, "\n")

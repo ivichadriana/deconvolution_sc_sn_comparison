@@ -1,9 +1,9 @@
 """
-This script performs single-nucleus to single-cell transcriptomic mapping and pseudobulk generation 
-for adipose tissue datasets using scVI, PCA, and DEG filtering strategies. It trains conditional and 
-non-conditional scVI models (with and without differentially expressed genes), applies various 
-transformation methods to held-out snRNA-seq data, integrates it with single-cell data, and generates 
-realistic and random pseudobulk mixtures. The resulting pseudobulks are saved for downstream analysis 
+This script performs single-nucleus to single-cell transcriptomic mapping and pseudobulk generation
+for adipose tissue datasets using scVI, PCA, and DEG filtering strategies. It trains conditional and
+non-conditional scVI models (with and without differentially expressed genes), applies various
+transformation methods to held-out snRNA-seq data, integrates it with single-cell data, and generates
+realistic and random pseudobulk mixtures. The resulting pseudobulks are saved for downstream analysis
 and benchmarking of deconvolution methods.
 """
 
@@ -20,11 +20,7 @@ from sklearn.decomposition import PCA
 
 sys.path.insert(1, "../../")
 sys.path.insert(1, "../")
-from src.helpers import (
-    prepare_data,
-    split_single_cell_data,
-    pick_cells
-)
+from src.helpers import prepare_data, split_single_cell_data, pick_cells
 from src.helpers import (
     downsample_cells_by_type,
     make_references,
@@ -138,6 +134,7 @@ flattened_index = list(flattened_index)
 all_de_genes_list = list(dict.fromkeys(flattened_index))
 print("Total unique DEGs:", len(all_de_genes_list))
 
+
 ## And removing
 def remove_degs_from_adata(adata, degs):
     """
@@ -154,6 +151,7 @@ def remove_degs_from_adata(adata, degs):
     print(adata.shape)
     print(filtered.shape)
     return filtered
+
 
 sc_adata_nodeg = remove_degs_from_adata(sc_adata, all_de_genes_list)
 sn_adata_nodeg = remove_degs_from_adata(sn_adata, all_de_genes_list)

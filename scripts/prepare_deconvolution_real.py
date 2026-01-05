@@ -10,24 +10,16 @@ Key steps
 1. **Reproducibility** – fixes NumPy, Python, and PyTorch seeds.
 2. **Data loading** – pulls bulk, single-cell (SC) and single-nucleus (SN)
    datasets via `open_adipose_datasets_all`.
-3. **Pre-processing**  
-   • Down-samples large cell types to ≤1 500 cells.  
+3. **Pre-processing**
+   • Down-samples large cell types to ≤1 500 cells.
    • Detects cell-type DEGs with DESeq2 (`pydeseq2`) and optionally imports
-     external DEG sets.  
+     external DEG sets.
 4. **Reference-panel creation** – augments the SC atlas with held-out SN cells
-   using multiple strategies and saves each as BayesPrism-ready files:  
-   • *Raw counts* (`ref_real_rawSN`)  
-   • *PCA projection* of SN onto SC space (`ref_real_pcaSN`)  
-   • *DEG filtering* (self, external, intersection, random control)  
-   • *DEG + PCA* (`ref_real_degPCA_SN`)  
-   • *scVI* latent-space shifts  
-     – conditional model (`ref_real_scviSN`)  
-     – non-conditional model (`ref_real_scvi_LSshift_SN`)  
-     – with prior DEG removal (`ref_real_degScviSN`, `ref_real_degScviLSshift_SN`)
-5. **Output** – writes:  
-   • `ref_real_*` reference folders (BayesPrism format)  
-   • Down-sampled SC (`sc_raw_real`) and full SN (`sn_raw_real`) H5ADs  
-   • Bulk expression table for deconvolution  
+   using multiple strategies and saves each as BayesPrism-ready files.
+5. **Output** – writes:
+   • `ref_real_*` reference folders (BayesPrism format)
+   • Down-sampled SC (`sc_raw_real`) and full SN (`sn_raw_real`) H5ADs
+   • Bulk expression table for deconvolution
    • Trained scVI checkpoints for reuse.
 
 """
@@ -78,6 +70,7 @@ from src.deg_funct import (
     differential_expression_analysis,
     remove_diff_genes,
     differential_expression_analysis_parallel,
+    select_random_control_genes,
 )
 
 from src.transforms import (
@@ -216,33 +209,50 @@ if __name__ == "__main__":
         name=f"ref_real_degIntSN",
     )
 
-    ### And Random genes equal to this datasets DEGS ####
+    ### Random control (size-matched, excluding DEGs & 3-dataset intersect) ####
     ###########################
-    # gather the union of DEGs across all cell types
-    all_diff_genes = set()
-    for df in diff_genes.values():
-        all_diff_genes |= set(df.index)
+    # Build the intersect-3ds gene *list* from the same loader you already use
+    _intersect_for_random = (
+        load_intersect_degs_or_fail()
+    )  # returns {"all": DataFrame(index=genes)}
+    _intersect_keys = list(_intersect_for_random.keys())
+    if len(_intersect_keys) == 0:
+        raise RuntimeError("load_intersect_degs_or_fail() returned an empty mapping.")
 
-    random_genes = np.random.choice(
-        adata_sc.var_names, size=len(all_diff_genes), replace=False
+    # Flatten 1-tuples like ('A1BG',) -> 'A1BG', then cast to str (keeps things simple/minimal)
+    _intersect_idx = _intersect_for_random[_intersect_keys[0]].index
+    _intersect_list = [
+        g[0] if isinstance(g, tuple) and len(g) == 1 else g for g in _intersect_idx
+    ]
+    _intersect_list = list(map(str, _intersect_list))
+
+    # Select a size-matched, non-DE, non-intersect random set present in both SC & SN
+    random_dict = select_random_control_genes(
+        adata_sc_subset=adata_sc,
+        adata_sn_subset=sn_missing,
+        diff_genes=diff_genes,  # exclude this dataset's DEGs
+        intersect3ds_genes=_intersect_list,  # exclude 3-dataset intersect genes
+        size=None,  # size = |union of diff_genes|
+        seed=SEED,
+        require_presence_in_both=True,
+        return_as="dict",
     )
 
-    # Wrap in a DataFrame so remove_diff_genes(...) sees a dict with 'random' -> DataFrame
-    random_df = pd.DataFrame(
-        index=random_genes
-    )  # an empty DataFrame with row index = gene names
-    random_dict = {"random": random_df}
+    # Optional: quick sanity log
+    print(f"[real] degRandSN: sampled {list(random_dict.values())[0].shape[0]} genes.")
 
+    # Remove those random genes and save
     sc_filtered_r, sn_filtered_r = remove_diff_genes(
-        sc_adata=adata_sc, sn_adata=sn_missing, diff_genes=random_dict
+        sc_adata=adata_sc,
+        sn_adata=sn_missing,
+        diff_genes=random_dict,
     )
-    # Combine and save
+
     concat_and_save(
         adatas=[sc_filtered_r, sn_filtered_r],
         output_path=args.output_path,
-        name=f"ref_real_degRandSN",
+        name="ref_real_degRandSN",
     )
-
     ### 4) DEG-Filtered + PCA ####
     build_deg_pca_sn_ref(
         adata_sc=adata_sc,
