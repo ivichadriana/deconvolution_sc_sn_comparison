@@ -3,7 +3,6 @@
 #SBATCH --account=amc-general
 #SBATCH --output=output_RealBulk_andSC_Comparison_%A_%a.log
 #SBATCH --error=error_RealBulk_andSC_Comparison_%A_%a.log 
-#SBATCH --qos=normal
 #SBATCH --time=24:00:00                              
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

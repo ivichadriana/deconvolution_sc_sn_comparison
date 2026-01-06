@@ -3,11 +3,7 @@
 #SBATCH --account=amc-general
 #SBATCH --output=output_Train_nodeg_%A_%a.log
 #SBATCH --error=error_Train_nodeg_%A_%a.log 
-#SBATCH --mail-type=ALL
-#SBATCH --mail-user=adriana.ivich@cuanschutz.edu
-#SBATCH --partition=amilan
-#SBATCH --qos=normal
-#SBATCH --time=24:00:00                              
+#SBATCH --time=02:00:00                              
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
@@ -17,9 +13,8 @@
 set -e
 
 # Get the directory of this script and define base paths relative to it
-SCRIPT_DIR=$(dirname "$(realpath "$0")")
-BASE_DIR=$(realpath "$SLURM_SUBMIT_DIR/..")
-
+BASE_DIR="${SLURM_SUBMIT_DIR}"
+scripts_path="${BASE_DIR}/scripts"
 # Define relative data and output paths
 data_path="${BASE_DIR}/data"
 output_root="${BASE_DIR}/data/deconvolution"
@@ -39,6 +34,7 @@ noise=True
 deconvolution_method="bayesprism"
 deseq_alpha=0.01
 min_cells_per_type=50
+
 # List of dataset names
 datasets=("ADP" "PBMC" "MBC" "MSB")
 
@@ -51,7 +47,7 @@ mkdir -p "$output_path"
 
 echo "****** Running differential_gene_expression.py for ${res_name} ******"
 
-python "${BASE_DIR}/scripts/differential_gene_expression.py" \
+python "${scripts_path}/differential_gene_expression.py" \
     --res_name="$res_name" \
     --data_path="$data_path" \
     --output_path="$output_path" \
@@ -59,14 +55,14 @@ python "${BASE_DIR}/scripts/differential_gene_expression.py" \
     --min_cells_per_type="$min_cells_per_type"
 
 echo "****** Running train_scvi_models_allgenes.py for ${res_name} ******"
-python "${BASE_DIR}/scripts/train_scvi_models_allgenes.py" \
+python "${scripts_path}/train_scvi_models_allgenes.py" \
     --res_name="$res_name" \
     --data_path="$data_path" \
     --output_path="$output_path" \
     --deseq_alpha="$deseq_alpha"
 
 echo "****** Running train_scvi_models_nodeg.py for ${res_name} ******"
-python "${BASE_DIR}/scripts/train_scvi_models_nodeg.py" \
+python "${scripts_path}/train_scvi_models_nodeg.py" \
     --res_name="$res_name" \
     --data_path="$data_path" \
     --output_path="$output_path" \

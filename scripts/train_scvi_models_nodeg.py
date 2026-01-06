@@ -58,23 +58,52 @@ import scvi
 from pydeseq2.default_inference import DefaultInference
 from pydeseq2.dds import DeseqDataSet
 from pydeseq2.ds import DeseqStats
-
 import sys
+from pathlib import Path
 
-sys.path.insert(1, "../../")
-sys.path.insert(1, "../")
-sys.path.insert(1, "../../../../../")
-from src.helpers import prepare_data, split_single_cell_data
-from src.helpers import pick_cells, make_references
-from src.helpers import transform_heldout_sn_to_mean_sc
-from src.helpers import make_pseudobulks, create_fixed_pseudobulk
-from src.helpers import run_deseq2_for_cell_type, transform_heldout_sn_to_mean_sc_local
-from src.helpers import differential_expression_analysis, remove_diff_genes
-from src.helpers import differential_expression_analysis_parallel
+# repo root is the parent of the scripts/ directory
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from src.helpers import (
-    save_cibersort,
-    save_bayesprism_references,
+    make_pseudobulks,
     save_bayesprism_pseudobulks,
+    save_cibersort,
+    scvi_train_model,
+    set_all_seeds,
+    concat_and_save,
+    get_donor_views,
+    downsample_cells_by_type,
+    make_references,
+    save_bayesprism_references,
+    prepare_data,
+    split_single_cell_data,
+    pick_cells,
+    open_adipose_datasets_all,
+    save_bayesprism_realbulks,
+)
+
+from src.deg_funct import (
+    create_fixed_pseudobulk,
+    load_others_degs,
+    run_deseq2_for_cell_type,
+    load_or_calc_degs,
+    differential_expression_analysis,
+    remove_diff_genes,
+    differential_expression_analysis_parallel,
+    select_random_control_genes,
+)
+
+from src.transforms import (
+    transform_heldout_sn_to_mean_sc_VAE,
+    transform_heldout_sn_to_mean_sc_local,
+    load_intersect_degs_or_fail,
+    build_deg_pca_sn_ref,
+    build_pca_sn_ref,
+    transform_heldout_sn_to_mean_sc,
+    calculate_median_library_size,
+    get_normalized_expression_from_latent,
 )
 
 if __name__ == "__main__":

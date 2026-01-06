@@ -169,4 +169,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-/data
+# HPC / local-only
+results/
+data_not_for_use/
+data_not_for_use_

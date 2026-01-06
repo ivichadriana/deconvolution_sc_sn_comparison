@@ -26,6 +26,123 @@ from anndata import AnnData
 from pydeseq2.default_inference import DefaultInference
 from pydeseq2.dds import DeseqDataSet
 from pydeseq2.ds import DeseqStats
+from typing import Dict, Iterable, Optional, Set, Union
+
+
+def _to_str_set(x: Union[Iterable, pd.Index, pd.Series, pd.DataFrame]) -> Set[str]:
+    """
+    Robustly coerce a variety of inputs (iterable of genes, pandas Index/Series,
+    or a DataFrame with genes as index) into a set[str] of gene names.
+    """
+    if x is None:
+        return set()
+    if isinstance(x, pd.DataFrame):
+        return set(map(str, x.index))
+    if isinstance(x, (pd.Index, pd.Series)):
+        return set(map(str, x.values))
+    try:
+        return set(map(str, x))
+    except TypeError:
+        raise TypeError(
+            "Unsupported type for gene collection; pass an iterable/Index/Series/DataFrame."
+        )
+
+
+def select_random_control_genes(
+    adata_sc_subset,
+    adata_sn_subset,
+    diff_genes: Dict[str, Union[pd.DataFrame, pd.Index, pd.Series, Iterable[str]]],
+    intersect3ds_genes: Union[Iterable[str], pd.Index, pd.Series, pd.DataFrame],
+    size: Optional[int] = None,
+    seed: Optional[int] = 42,
+    require_presence_in_both: bool = True,
+    return_as: str = "dict",
+):
+    """
+    Build a size-matched random gene set that EXCLUDES:
+      1) all genes listed as DE between cell types (union over `diff_genes`)
+      2) all genes contained in the 'intersect_3ds' list
+
+    Parameters
+    ----------
+    adata_sc_subset : anndata.AnnData
+        SC AnnData (typically SC minus the held-out cell type).
+    adata_sn_subset : anndata.AnnData
+        SN AnnData (typically SN for the held-out cell type, or SN minus held-out for PCA prep).
+    diff_genes : dict[str, (DataFrame|Index|Series|Iterable[str])]
+        Mapping from cell_type (or any key) -> collection whose *index/values* are DEG gene names.
+        Example: what you currently pass into `remove_diff_genes`.
+    intersect3ds_genes : (Iterable|Index|Series|DataFrame)
+        The intersect_3ds gene list to exclude (e.g., loaded from `intersect_3ds.csv`).
+    size : int or None, default None
+        Number of genes to sample. If None, uses the size of the *union* of DEGs in `diff_genes`.
+    seed : int or None
+        Seed for reproducible sampling (NumPy Generator).
+    require_presence_in_both : bool, default True
+        If True, only sample from genes present in BOTH adata_sc_subset and adata_sn_subset.
+        If False, sample from the SC gene universe only.
+    return_as : {"dict","index","list"}, default "dict"
+        - "dict": return {"random": DataFrame(index=random_genes)} suitable for `remove_diff_genes`
+        - "index": return a pandas.Index of gene names
+        - "list":  return a Python list of gene names
+
+    Returns
+    -------
+    One of:
+        dict[str, pd.DataFrame] | pd.Index | list[str]
+
+    Raises
+    ------
+    ValueError if there are no eligible candidate genes to sample.
+    """
+    # --- define the gene universe we can draw from ---
+    sc_genes = set(map(str, adata_sc_subset.var_names))
+    if require_presence_in_both:
+        sn_genes = set(map(str, adata_sn_subset.var_names))
+        gene_universe = sc_genes & sn_genes
+    else:
+        gene_universe = sc_genes
+
+    # --- union of all DE genes provided in `diff_genes` ---
+    deg_union: Set[str] = set()
+    for df_like in (diff_genes or {}).values():
+        deg_union |= _to_str_set(df_like)
+
+    # --- intersect_3ds as a set[str] ---
+    intersect3ds_set = _to_str_set(intersect3ds_genes)
+
+    # --- candidates are genes in the universe minus exclusions ---
+    excluded = deg_union | intersect3ds_set
+    candidates = sorted(gene_universe - excluded)
+
+    if size is None:
+        size = len(deg_union)
+
+    if len(candidates) == 0:
+        raise ValueError(
+            "No eligible non-DEG, non-intersect3ds genes available to sample from. "
+            "Relax constraints or check inputs."
+        )
+
+    # Cap size if candidate pool is smaller; warn noiselessly via print (you can switch to logging)
+    k = min(size, len(candidates))
+    if k < size:
+        print(
+            f"[select_random_control_genes] Requested {size} genes but only {len(candidates)} "
+            f"eligible; sampling {k}."
+        )
+
+    rng = np.random.default_rng(seed)
+    picked = rng.choice(candidates, size=k, replace=False)
+
+    if return_as == "dict":
+        return {"random": pd.DataFrame(index=pd.Index(picked.astype(str), name=None))}
+    if return_as == "index":
+        return pd.Index(picked.astype(str))
+    if return_as == "list":
+        return picked.astype(str).tolist()
+
+    raise ValueError("`return_as` must be one of {'dict','index','list'}.")
 
 
 def load_gene_list(csv_path):
@@ -46,29 +163,72 @@ def remove_diff_genes(sc_adata, sn_adata, diff_genes):
     Removes differentially expressed genes from the AnnData objects.
     If no differentially expressed genes are found, return original data.
     """
-    if not diff_genes:  # Handle the case where no genes are found
+    if not diff_genes:
         print("No differentially expressed genes found. Skipping gene removal step.")
         return sc_adata, sn_adata
 
-    diff_gene_set = list(
-        set(np.concatenate([df.index.values for df in diff_genes.values()]))
+    # --- Build a normalized set[str] of DEGs (works for DF, Index/list) ---
+    diff_gene_set = set()
+    for v in diff_genes.values():
+        if hasattr(v, "index"):  # DataFrame or Series with gene names in index
+            diff_gene_set |= set(map(str, v.index))
+        else:  # list-like of gene names
+            diff_gene_set |= set(map(str, v))
+
+    if len(diff_gene_set) == 0:
+        print("DEG collection is empty. Skipping gene removal step.")
+        return sc_adata, sn_adata
+
+    # --- Ensure var_names are compared as strings ---
+    sc_genes = sc_adata.var_names.astype(str)
+    sn_genes = sn_adata.var_names.astype(str)
+
+    # --- Filter ---
+    mask_sc = ~sc_genes.isin(diff_gene_set)
+    mask_sn = ~sn_genes.isin(diff_gene_set)
+
+    sc_adata_filtered = sc_adata[:, mask_sc].copy()
+    sn_adata_filtered = sn_adata[:, mask_sn].copy()
+
+    # very light sanity log
+    print(
+        f"[remove_diff_genes] removed: SC={int((~mask_sc).sum())}, SN={int((~mask_sn).sum())}"
     )
 
-    print("This is diff_gene_set completed:", diff_gene_set)
-
-    print("These are the anndatas before filtering:")
-    print(sc_adata.shape)
-    print(sn_adata.shape)
-
-    # Filter the AnnData objects
-    sn_adata_filtered = sn_adata[:, ~np.isin(sn_adata.var_names, diff_gene_set)].copy()
-    sc_adata_filtered = sc_adata[:, ~np.isin(sc_adata.var_names, diff_gene_set)].copy()
-
-    print("These are the anndatas after filtering:")
-    print(sc_adata_filtered.shape)
-    print(sn_adata_filtered.shape)
-
     return sc_adata_filtered, sn_adata_filtered
+
+
+def _coerce_to_df_of_genes(val) -> pd.DataFrame:
+    """
+    Return a DataFrame with genes in the index from a variety of inputs:
+      - split-orient dict {'index','columns','data'}
+      - existing DataFrame
+      - list of genes
+      - dict of {gene: ...}
+    """
+    if isinstance(val, pd.DataFrame):
+        df = val.copy()
+        df.index = df.index.astype(str)
+        return df
+
+    if isinstance(val, dict) and {"index", "columns", "data"}.issubset(val.keys()):
+        df = pd.DataFrame(**val)
+        df.index = df.index.astype(str)
+        return df
+
+    # list-like: treat as just gene names
+    if isinstance(val, list):
+        return pd.DataFrame(index=pd.Index(map(str, val)))
+
+    # dict-like (not split): keys are genes
+    if isinstance(val, dict):
+        return pd.DataFrame(index=pd.Index(map(str, val.keys())))
+
+    # last resort: try to iterate
+    try:
+        return pd.DataFrame(index=pd.Index(map(str, val)))
+    except Exception:
+        return pd.DataFrame(index=pd.Index([], dtype=str))
 
 
 def differential_expression_analysis_parallel(
@@ -418,74 +578,56 @@ def load_others_degs(res_name: str, base_path: str):
 def load_or_calc_degs(
     output_path, adata_sc_ref, adata_sn_ref, deseq_alpha, patient_id=False
 ):
-    if patient_id:
-        genes_save_path = f"{output_path}/degs_{patient_id}.json"
-    else:
-        genes_save_path = f"{output_path}/degs.json"
+    genes_save_path = (
+        f"{output_path}/degs_{patient_id}.json"
+        if patient_id
+        else f"{output_path}/degs.json"
+    )
+
+    # 1) Try load
     if os.path.exists(genes_save_path):
         try:
             with open(genes_save_path, "r") as file:
-                diff_genes_json = json.load(file)
-            # Convert the JSON representation back into DataFrames
-            diff_genes = {}
-            for key, value in diff_genes_json.items():
-                # Check if this value looks like a DataFrame stored in 'split' orientation
-                if isinstance(value, dict) and {"index", "columns", "data"}.issubset(
-                    value.keys()
-                ):
-                    diff_genes[key] = pd.DataFrame(**value)
-                else:
-                    diff_genes[key] = value
+                raw = json.load(file)
         except json.JSONDecodeError:
-            print(
-                "Warning: JSON file is empty or corrupted. Recalculating diff_genes..."
-            )
-            print(
-                "Creating pseudobulk of size 10 for SC and SN data for DGE analysis..."
-            )
-            pseudo_sc_adata = create_fixed_pseudobulk(adata_sc_ref, group_size=10)
-            pseudo_sn_adata = create_fixed_pseudobulk(adata_sn_ref, group_size=10)
-            diff_genes = differential_expression_analysis_parallel(
-                sn_adata=pseudo_sn_adata,
-                sc_adata=pseudo_sc_adata,
-                deseq_alpha=deseq_alpha,
-                num_threads=4,  # matches SLURM --ntasks
-                n_cpus_per_thread=16,  # matches SLURM --cpus-per-task
-            )
-            # Write a JSON-serializable copy to disk
-            diff_genes_json = {
-                key: value.to_dict(orient="split")
-                if isinstance(value, pd.DataFrame)
-                else value
-                for key, value in diff_genes.items()
-            }
-            with open(genes_save_path, "w") as file:
-                json.dump(diff_genes_json, file)
-    else:
-        # Calculate differentially expressed genes
-        print("Not found previous diff. gene expr... calculating now!")
-        print("Creating pseudobulk of size 10 for SC and SN data for DGE analysis...")
-        pseudo_sc_adata = create_fixed_pseudobulk(adata_sc_ref, group_size=10)
-        pseudo_sn_adata = create_fixed_pseudobulk(adata_sn_ref, group_size=10)
-        diff_genes = differential_expression_analysis_parallel(
-            sn_adata=pseudo_sn_adata,
-            sc_adata=pseudo_sc_adata,
-            deseq_alpha=deseq_alpha,
-            num_threads=4,  # matches SLURM --ntasks
-            n_cpus_per_thread=16,  # matches SLURM --cpus-per-task
-        )
-        print("Found these many differentially expressed genes:")
-        for key in diff_genes.keys():
-            print(key)
-            print(diff_genes[key].shape)
+            raw = None
 
-        # Create a JSON-serializable copy for dumping, but keep diff_genes as DataFrames
-        diff_genes_json = {
-            key: value.to_dict(orient="split")
-            if isinstance(value, pd.DataFrame)
-            else value
-            for key, value in diff_genes.items()
-        }
+        if raw is not None:
+            # Coerce every entry into a DataFrame with genes in the index
+            diff_genes = {str(k): _coerce_to_df_of_genes(v) for k, v in raw.items()}
+            # Re-save canonically (split) so future runs are consistent
+            diff_genes_json = {
+                k: v.to_dict(orient="split") for k, v in diff_genes.items()
+            }
+            with open(genes_save_path, "w") as f:
+                json.dump(diff_genes_json, f)
+            return diff_genes
+
+        # fallthrough → recompute if unreadable
+
+    # 2) Compute fresh (pseudobulk) if not found or unreadable
+    print("Not found previous diff. gene expr... calculating now!")
+    print("Creating pseudobulk of size 10 for SC and SN data for DGE analysis...")
+    pseudo_sc_adata = create_fixed_pseudobulk(adata_sc_ref, group_size=10)
+    pseudo_sn_adata = create_fixed_pseudobulk(adata_sn_ref, group_size=10)
+
+    diff_genes = differential_expression_analysis_parallel(
+        sn_adata=pseudo_sn_adata,
+        sc_adata=pseudo_sc_adata,
+        deseq_alpha=deseq_alpha,
+        num_threads=4,  # matches SLURM --ntasks
+        n_cpus_per_thread=16,  # matches SLURM --cpus-per-task
+    )
+
+    # Coerce every entry to DataFrame (even fresh results) for uniformity
+    diff_genes = {str(k): _coerce_to_df_of_genes(v) for k, v in diff_genes.items()}
+
+    print("Found these many differentially expressed genes:")
+    for key, df in diff_genes.items():
+        print(key, df.shape)
+
+    # Save canonically as split
+    diff_genes_json = {k: v.to_dict(orient="split") for k, v in diff_genes.items()}
     with open(genes_save_path, "w") as file:
         json.dump(diff_genes_json, file)
 

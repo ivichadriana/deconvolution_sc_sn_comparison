@@ -3,18 +3,7 @@
 Per-Donor Adipocyte Reference Generation
 
 For each SN donor (batch), sample 95 adipocytes and pool neutrophils across all donors,
-then generate multiple BayesPrism references:
-  - rawSN
-  - pcaSN
-  - degSN
-  - degOtherSN
-  - degIntSN
-  - degRandSN
-  - degPCA_SN
-  - scviSN (conditional)
-  - scvi_LSshift_SN (non-conditional)
-  - degScviSN
-  - degScviLSshift_SN
+then generate multiple BayesPrism references.
 
 DEGs and scVI models are recomputed per donor so that models are tailored to each donor’s
 technical profile. Outputs are prefixed with the donor ID.
@@ -34,6 +23,7 @@ import pandas as pd
 import scvi
 import torch
 from sklearn.decomposition import PCA
+import torch
 
 sys.path.insert(1, "../../")
 sys.path.insert(1, "../")
@@ -64,6 +54,7 @@ from src.deg_funct import (
     differential_expression_analysis,
     remove_diff_genes,
     differential_expression_analysis_parallel,
+    select_random_control_genes,
 )
 
 from src.transforms import (
@@ -78,7 +69,7 @@ from src.transforms import (
 )
 
 SEED = 42
-set_all_seeds(SEED)
+set_all_seeds(42)
 
 
 def main():
@@ -98,6 +89,7 @@ def main():
         type=str,
         default="bayesprism",
         help="Deconvolution method",
+        required=False,
     )
 
     args = parser.parse_args()
@@ -199,25 +191,40 @@ def main():
             name=f"ref_{donor}_degIntSN",
         )
 
-        # ---- degRandSN ----
-        # gather the union of DEGs across all cell types
-        all_diff_genes = set()
-        for df in diff_genes.values():
-            all_diff_genes |= set(df.index)
+        # ---- degRandSN (safe random: excludes DEGs & 3-dataset intersect) ----
+        _intersect_for_random = (
+            load_intersect_degs_or_fail()
+        )  # {"all": DataFrame(index=genes)}
+        _intersect_keys = list(_intersect_for_random.keys())
+        if len(_intersect_keys) == 0:
+            raise RuntimeError(
+                "load_intersect_degs_or_fail() returned an empty mapping."
+            )
 
-        random_genes = np.random.choice(
-            adata_sc.var_names, size=len(all_diff_genes), replace=False
+        # flatten 1-tuples like ('A1BG',) -> 'A1BG', then cast to str
+        _intersect_idx = _intersect_for_random[_intersect_keys[0]].index
+        _intersect_list = [
+            g[0] if isinstance(g, tuple) and len(g) == 1 else g for g in _intersect_idx
+        ]
+        _intersect_list = list(map(str, _intersect_list))  # keep simple
+
+        random_dict = select_random_control_genes(
+            adata_sc_subset=adata_sc,
+            adata_sn_subset=sn_missing,
+            diff_genes=diff_genes,  # exclude donor-specific DEGs
+            intersect3ds_genes=_intersect_list,  # exclude 3-dataset intersect genes
+            size=None,  # size = |union of diff_genes|
+            seed=SEED,
+            require_presence_in_both=True,
+            return_as="dict",
         )
-
-        # Wrap in a DataFrame so remove_diff_genes(...) sees a dict with 'random' -> DataFrame
-        random_df = pd.DataFrame(
-            index=random_genes
-        )  # an empty DataFrame with row index = gene names
-        random_dict = {"random": random_df}
 
         sc_filtered_r, sn_filtered_r = remove_diff_genes(
-            sc_adata=adata_sc, sn_adata=sn_missing, diff_genes=random_dict
+            sc_adata=adata_sc,
+            sn_adata=sn_missing,
+            diff_genes=random_dict,
         )
+
         concat_and_save(
             adatas=[sc_filtered_r, sn_filtered_r],
             output_path=args.output_path,

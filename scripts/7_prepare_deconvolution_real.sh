@@ -20,18 +20,28 @@ conda activate env_deconv
 
 sleep 5
 
-deconvolution_method="bayesprism"
-deseq_alpha=0.01
-
 res_name="ADP"
 output_path="${output_root}/Real_ADP"
+deseq_alpha=0.01
+
+echo "****** Running process_bulks_train_models.py ******"
+python "${BASE_DIR}/scripts/process_bulks_train_models.py" 
 
 echo "****** Running prepare_deconvolution_real.py ******"
 python "${BASE_DIR}/scripts/prepare_deconvolution_real.py"  \
     --res_name="$res_name" \
     --output_path="$output_path" \
     --degs_path="$output_root" \
-    --deconvolution_method="$deconvolution_method" \
     --deseq_alpha="$deseq_alpha"
+
+echo "****** Running prepare_deconvolution_perdonor.py ******"
+python "${BASE_DIR}/scripts/prepare_deconvolution_perdonor.py"  \
+    --res_name="$res_name" \
+    --output_path="$output_path" \
+    --degs_path="$output_root" \
+    --deseq_alpha="$deseq_alpha"
+
+python scripts/check_references.py \
+    --output_path="$output_path"
 
 conda deactivate

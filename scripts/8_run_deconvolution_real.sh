@@ -2,8 +2,6 @@
 #SBATCH --job-name=SCADEN_Deconvolution_perdonreal
 #SBATCH --output=output_SCADEN_Deconvolution_perdonreal_%A_%a.log
 #SBATCH --error=error_SCADEN_Deconvolution_realperdon_%A_%a.err
-#SBATCH --mail-type=ALL
-#SBATCH --qos=normal
 #SBATCH --time=11:00:00  
 #SBATCH --mem=70G
 #SBATCH --cpus-per-task=16

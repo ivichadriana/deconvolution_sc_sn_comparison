@@ -54,6 +54,7 @@ sys.path.insert(1, "../../")
 sys.path.insert(1, "../")
 sys.path.insert(1, "../../../")
 
+
 def load_intersect_degs_or_fail():
     path = os.path.join(os.getcwd(), "../data/intersect_3ds.csv")
     if not os.path.exists(path):
@@ -63,6 +64,7 @@ def load_intersect_degs_or_fail():
     df = pd.read_csv(path, index_col=0)
     print("this are the DEGs intersection:", df)
     return {"all": pd.DataFrame(index=df.values)}
+
 
 def build_pca_sn_ref(adata_sc, adata_sn, sn_missing, output_path, donor):
     df = transform_heldout_sn_to_mean_sc_local(
@@ -77,6 +79,7 @@ def build_pca_sn_ref(adata_sc, adata_sn, sn_missing, output_path, donor):
     adata_sn_tx.var_names = df.columns
     adata_sn_tx.obs = sn_missing.obs.copy()
     concat_and_save([adata_sc, adata_sn_tx], output_path, f"ref_{donor}_pcaSN")
+
 
 def build_deg_pca_sn_ref(
     adata_sc, adata_sn, sn_missing, diff_genes, output_path, donor
@@ -95,6 +98,7 @@ def build_deg_pca_sn_ref(
     adata_tx.var_names = df.columns
     adata_tx.obs = sn_missing.obs.copy()
     concat_and_save([sc_f, adata_tx], output_path, f"ref_{donor}_degPCA_SN")
+
 
 def transform_heldout_sn_to_mean_sc_VAE(
     model: scvi.model.SCVI,

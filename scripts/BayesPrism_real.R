@@ -2,33 +2,11 @@
 
 # ============================================================
 # R script to run BayesPrism on all references created
-# by the "prepare_realbulks_references.py" script (or similar).
+# by the "prepare_realbulks_references.py" script.
 #
 # Usage:
-#   Rscript BayesPrism_realbulks.R <DATASET_NAME>
-#
-# We parallelize the InstaPrism function with n.cores in the cluster environment.
+#   Rscript BayesPrism_rea.R <DATASET_NAME>
 # ============================================================
-
-# Avoid interactive prompts
-options(repos = c(CRAN = "https://cloud.r-project.org"))
-
-# If needed, ensure the required packages are installed
-if (!requireNamespace("scran", quietly = TRUE)) {
-  BiocManager::install("scran")
-}
-if (!requireNamespace("SingleCellExperiment", quietly = TRUE)) {
-  BiocManager::install("SingleCellExperiment")
-}
-if (!requireNamespace("BayesPrism", quietly = TRUE)) {
-  # install via CRAN or devtools as needed
-  install.packages("BayesPrism")
-}
-if (!requireNamespace("InstaPrism", quietly = TRUE)) {
-  # from dev or local install
-  # devtools::install_github("Danko-Lab/InstaPrism")  # example
-  stop("InstaPrism is not installed. Please install it before proceeding.")
-}
 
 # Load libraries
 library(scran)
@@ -44,7 +22,7 @@ if (length(args) == 0) {
 data_type <- args[1]
 
 # --- Set up directories ---
-script_dir <- getwd() # or another logic to detect the script location
+script_dir <- file.path(getwd(), "scripts")
 bulks_path <- import_path <- file.path(script_dir, "..", "data", "deconvolution", data_type)
 export_path <- file.path(script_dir, "..", "results", data_type)
 cat("Import path:", import_path, "\n")
@@ -55,7 +33,7 @@ if (!dir.exists(export_path)) dir.create(export_path, recursive = TRUE)
 # --- 1) Load the real bulk mixture data (processed_bulks.csv) ---
 realbulks_file <- file.path(bulks_path, "processed_bulks.csv")
 if (!file.exists(realbulks_file)) {
-  stop("Cannot find the realbulks.csv file at: ", realbulks_file)
+  stop("Cannot find processed_bulks.csv file at: ", realbulks_file)
 }
 realbulks_data <- read.csv(realbulks_file, stringsAsFactors = FALSE, row.names = 1)
 cat("Loaded realbulks_data with dim:", dim(realbulks_data), "\n")
@@ -101,7 +79,7 @@ for (base_ref in base_refs) {
 
   # Typically, the cell_state.csv has columns: cell_type, cell_subtype, ...
   # We'll assume row 1 is cell_type, row 2 is cell_subtype, etc.
-  # Check how the scripts generate it
+  # Check how the scripts generates it if questions remain
   cell_type_labels <- t(cell_state[1])
   cell_state_labels <- t(cell_state[2])
 
