@@ -1,4 +1,4 @@
-# Deconvolution using single-cell and single-nucleus RNA-seq
+# Integrating single-cell and single-nucleus datasets improves bulk RNA-seq deconvolution
 
 This project evaluates transformation strategies for using **single-nucleus RNA-seq (snRNA-seq)** as a reference for **bulk RNA-seq deconvolution**, compared to **single-cell RNA-seq (scRNA-seq)**.
 
